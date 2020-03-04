@@ -149,6 +149,7 @@ func (c *Client) MSetNX(values ...string) *ReplyBool {
 	return &reply
 }
 
+// ReplySet is the reply for SET redis command
 type ReplySet struct {
 	mode Mode
 	ok   bool

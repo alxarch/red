@@ -93,7 +93,7 @@ func (c *Client) Migrate(m Migrate) *ReplyOK {
 	return &reply
 }
 
-// Command implements Commander interface
+// Move moves a key to a different DB index
 func (c *Client) Move(key string, db int) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.Key(key)
@@ -102,7 +102,7 @@ func (c *Client) Move(key string, db int) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// ObjectRefCount is the redis' OBJECT REFCOUNT command
 func (c *Client) ObjectRefCount(key string) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.String("REFCOUNT")
@@ -111,7 +111,7 @@ func (c *Client) ObjectRefCount(key string) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// ObjectEncoding is the redis' OBJECT ENCODING command
 func (c *Client) ObjectEncoding(key string) *ReplyBulkString {
 	reply := ReplyBulkString{}
 	c.args.String("ENCODING")
@@ -120,7 +120,7 @@ func (c *Client) ObjectEncoding(key string) *ReplyBulkString {
 	return &reply
 }
 
-// Command implements Commander interface
+// ObjectIdleTime is the redis' OBJECT IDLETIME command
 func (c *Client) ObjectIdleTime(key string) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.String("IDLETIME")
@@ -129,7 +129,7 @@ func (c *Client) ObjectIdleTime(key string) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// ObjectFreq is the redis' OBJECT FREQ command
 func (c *Client) ObjectFreq(key string) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.String("FREQ")
@@ -138,16 +138,16 @@ func (c *Client) ObjectFreq(key string) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
-func (c *Client) ObjectHelp(key string) *ReplyInteger {
-	reply := ReplyInteger{}
+// ObjectHelp is the redis' OBJECT HELP command
+func (c *Client) ObjectHelp(key string) *ReplyBulkString {
+	reply := ReplyBulkString{}
 	c.args.String("HELP")
 	c.args.Key(key)
 	c.do("OBJECT", &reply)
 	return &reply
 }
 
-// Command implements Commander interface
+// Persist removes any TTL from a key
 func (c *Client) Persist(key string) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.Key(key)
@@ -155,7 +155,7 @@ func (c *Client) Persist(key string) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// PExpire adds a TTL to a key in milliseconds
 func (c *Client) PExpire(key string, ttl time.Duration) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.Key(key)
@@ -173,7 +173,7 @@ func (c *Client) PExpireAt(key string, tm time.Time) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// PTTL gets the TTL of a key in milliseconds
 func (c *Client) PTTL(key string) *ReplyInteger {
 	reply := ReplyInteger{}
 	c.args.Key(key)
@@ -181,7 +181,7 @@ func (c *Client) PTTL(key string) *ReplyInteger {
 	return &reply
 }
 
-// Command implements Commander interface
+// RandomKey returns a random key
 func (c *Client) RandomKey() *ReplyBulkString {
 	reply := ReplyBulkString{}
 	c.do("RANDOMKEY", &reply)
@@ -273,6 +273,7 @@ func (o SortOrder) String() string {
 
 }
 
+// ReplySort is the reply of redis' SORT command
 type ReplySort struct {
 	Sort
 	sorted resp.BulkStringArray
@@ -280,6 +281,7 @@ type ReplySort struct {
 	replyBase
 }
 
+// Reply returns the SORT reply
 func (r *ReplySort) Reply() ([]string, int64, error) {
 	return r.sorted, int64(r.stored), r.err
 }

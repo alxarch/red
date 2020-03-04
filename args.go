@@ -8,10 +8,12 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
+// CommandBuilder builds a redis command
 type CommandBuilder interface {
 	BuildCommand(args *ArgBuilder) string
 }
 
+// CommandWriter writes a redis command
 type CommandWriter interface {
 	WriteCommand(name string, args ...Arg) error
 }
@@ -39,48 +41,43 @@ type Arg struct {
 	num uint64
 }
 
-func (arg *Arg) Value() interface{} {
-	switch arg.typ {
+// Value returns the go value of an arg
+func (a *Arg) Value() interface{} {
+	switch a.typ {
 	case argString:
-		return arg.str
+		return a.str
 	case argKey:
-		return arg.str
+		return a.str
 	case argInt:
-		return int64(arg.num)
+		return int64(a.num)
 	case argUint:
-		return uint64(arg.num)
+		return uint64(a.num)
 	case argFloat64:
-		return float64(math.Float64frombits(arg.num))
+		return float64(math.Float64frombits(a.num))
 	case argFloat32:
-		return float32(math.Float64frombits(arg.num))
+		return float32(math.Float64frombits(a.num))
 	case argFalse:
 		return false
 	case argTrue:
 		return true
 	case argScore:
-		return string(strconv.AppendFloat([]byte(arg.str), math.Float64frombits(arg.num), 'f', -1, 64))
+		return string(strconv.AppendFloat([]byte(a.str), math.Float64frombits(a.num), 'f', -1, 64))
 	case argLex:
-		return string(append([]byte{byte(arg.num)}, arg.str...))
+		return string(append([]byte{byte(a.num)}, a.str...))
 	default:
 		return nil
 	}
 }
 
-func (a *Arg) Reset() {
-	*a = Arg{}
-}
-
+// Equal checks if two args a are equal
 func (a Arg) Equal(other Arg) bool {
 	return a == other
 }
 
+// IsZero checks if an arg is the zero value
 func (a Arg) IsZero() bool {
 	return a == Arg{}
 }
-
-// func (a *Arg) Type() ArgType {
-// 	return a.typ
-// }
 
 // Key creates a string argument to be used as a key.
 func Key(s string) Arg {
@@ -96,15 +93,23 @@ func String(s string) Arg {
 func Uint(n uint) Arg {
 	return Arg{typ: argUint, num: uint64(n)}
 }
+
+// Uint64 creates a uint64 argument.
 func Uint64(n uint64) Arg {
 	return Arg{typ: argUint, num: uint64(n)}
 }
+
+// Uint32 creates a uint32 argument.
 func Uint32(n uint32) Arg {
 	return Arg{typ: argUint, num: uint64(n)}
 }
+
+// Uint16 creates a uint16 argument.
 func Uint16(n uint16) Arg {
 	return Arg{typ: argUint, num: uint64(n)}
 }
+
+// Uint8 creates a uint8 argument.
 func Uint8(n uint8) Arg {
 	return Arg{typ: argUint, num: uint64(n)}
 }
@@ -113,15 +118,23 @@ func Uint8(n uint8) Arg {
 func Int(n int) Arg {
 	return Arg{typ: argInt, num: uint64(n)}
 }
+
+// Int64 creates an int64 argument.
 func Int64(n int64) Arg {
 	return Arg{typ: argInt, num: uint64(n)}
 }
+
+// Int32 creates an int32 argument.
 func Int32(n int32) Arg {
 	return Arg{typ: argInt, num: uint64(n)}
 }
+
+// Int16 creates an int16 argument.
 func Int16(n int16) Arg {
 	return Arg{typ: argInt, num: uint64(n)}
 }
+
+// Int8 creates an int8 argument.
 func Int8(n int8) Arg {
 	return Arg{typ: argInt, num: uint64(n)}
 }
@@ -130,12 +143,21 @@ func Int8(n int8) Arg {
 func Float64(f float64) Arg {
 	return Arg{typ: argFloat64, num: math.Float64bits(f)}
 }
+
+// Float32 creates a float argument.
+func Float32(f float32) Arg {
+	return Arg{typ: argFloat32, num: uint64(math.Float32bits(f))}
+}
+
+// Lex creates a lex range argument (ie '[foo', '(foo')
 func Lex(lex string, inclusive bool) Arg {
 	if inclusive {
 		return Arg{typ: argLex, str: lex, num: 1}
 	}
 	return Arg{typ: argLex, str: lex, num: 0}
 }
+
+// Score creates an score range argument (ie '42.0', '(42.0')
 func Score(f float64, inclusive bool) Arg {
 	if inclusive {
 		return Arg{typ: argScore, num: math.Float64bits(f)}
@@ -143,11 +165,6 @@ func Score(f float64, inclusive bool) Arg {
 	}
 	return Arg{typ: argScore, num: math.Float64bits(f), str: "("}
 
-}
-
-// Float32 creates a float argument.
-func Float32(f float32) Arg {
-	return Arg{typ: argFloat32, num: uint64(math.Float32bits(f))}
 }
 
 // Bool creates a boolean argument.
@@ -158,24 +175,31 @@ func Bool(b bool) Arg {
 	return Arg{typ: argFalse}
 }
 
+// Milliseconds creates an argument converting d to milliseconds
 func Milliseconds(d time.Duration) Arg {
 	return Arg{
 		typ: argInt,
 		num: uint64(d / time.Millisecond),
 	}
 }
+
+// Seconds creates an argument converting d to seconds
 func Seconds(d time.Duration) Arg {
 	return Arg{
 		typ: argInt,
 		num: uint64(d / time.Second),
 	}
 }
+
+// UnixSeconds creates an argument converting tm to unix timestamp
 func UnixSeconds(tm time.Time) Arg {
 	return Arg{
 		typ: argInt,
 		num: uint64(tm.Unix()),
 	}
 }
+
+// UnixMilliseconds creates an argument converting tm to unix ms timestamp
 func UnixMilliseconds(tm time.Time) Arg {
 	ts := tm.UnixNano() / int64(time.Millisecond)
 	return Arg{
@@ -184,31 +208,27 @@ func UnixMilliseconds(tm time.Time) Arg {
 	}
 }
 
-func MinInf() Arg {
+// MinScore creates a minus infinity score range argument
+func MinScore() Arg {
 	return String("-inf")
 }
-func MaxInf() Arg {
+
+// MaxScore creates a max infinity score range argument
+func MaxScore() Arg {
 	return String("+inf")
 }
-func ScoreExclusive(score float64) Arg {
-	return Score(score, false)
-}
-func ScoreInclusive(score float64) Arg {
-	return Float64(score)
-}
-func LexExclusive(lex string) Arg {
-	return Lex(lex, false)
-}
-func LexInclusive(lex string) Arg {
-	return Lex(lex, true)
-}
-func LexMaxInf() Arg {
+
+// MaxLex creates a max infinity lex range arument
+func MaxLex() Arg {
 	return String("+")
 }
-func LexMinInf() Arg {
+
+// MinLex creates a minus infinity lex range arument
+func MinLex() Arg {
 	return String("-")
 }
 
+// ArgBuilder is an argument builder
 type ArgBuilder struct {
 	args []Arg
 }
@@ -318,36 +338,36 @@ func QuickArgs(key string, args ...string) []Arg {
 	return out
 }
 
+// Writer writes commands to the underlying RESP writer
 type Writer struct {
-	KeyPrefix string
-	resp      *resp.Writer
-	scratch   []byte // Reusable buffer used for numeric conversions on args
+	dest    *resp.Writer
+	scratch []byte // Reusable buffer used for numeric conversions on args
 }
 
-func (w *Writer) WriteCommand(name string, args ...Arg) error {
-	if err := w.resp.WriteArray(int64(len(args) + 1)); err != nil {
+func (w *Writer) WriteCommand(keyPrefix, name string, args ...Arg) error {
+	if err := w.dest.WriteArray(int64(len(args) + 1)); err != nil {
 		return err
 	}
-	if err := w.resp.WriteBulkString(name); err != nil {
+	if err := w.dest.WriteBulkString(name); err != nil {
 		return err
 	}
-	return w.WriteArgs(args...)
+	return w.WriteArgs(keyPrefix, args...)
 }
 
 func (w *Writer) Flush() error {
-	return w.resp.Flush()
+	return w.dest.Flush()
 }
 func (w *Writer) Reset(dest *resp.Writer) {
-	w.resp = dest
+	w.dest = dest
 }
-func (w *Writer) WriteArgs(args ...Arg) (err error) {
-	resp := w.resp
+func (w *Writer) WriteArgs(keyPrefix string, args ...Arg) (err error) {
+	resp := w.dest
 	for i := range args {
 		switch arg := &args[i]; arg.typ {
 		case argString:
 			err = resp.WriteBulkString(arg.str)
 		case argKey:
-			err = resp.WriteBulkStringPrefix(w.KeyPrefix, arg.str)
+			err = resp.WriteBulkStringPrefix(keyPrefix, arg.str)
 		case argInt:
 			w.scratch = strconv.AppendInt(w.scratch[:0], int64(arg.num), 10)
 			err = resp.WriteBulkStringBytes(w.scratch)

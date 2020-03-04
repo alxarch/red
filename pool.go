@@ -323,6 +323,7 @@ func (p *Pool) popLocked() (conn *Conn) {
 	return
 }
 
+// GetDeadline waits until deadline for a connection
 func (p *Pool) GetDeadline(deadline time.Time) (c *Conn, err error) {
 	max := p.maxConnections()
 	isTimeout := !deadline.IsZero()

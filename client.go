@@ -6,12 +6,14 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
+// Client manages a red.Conn mapping redis commands to methods
 type Client struct {
 	conn    *Conn
 	args    ArgBuilder
 	replies []clientReply
 }
 
+// Do writes a redis command and binds the reply to dest
 func (c *Client) Do(dest interface{}, cmd CommandBuilder) {
 	var reply batchReply
 	if r, ok := dest.(batchReply); ok {
@@ -24,6 +26,7 @@ func (c *Client) Do(dest interface{}, cmd CommandBuilder) {
 	c.do(cmd.BuildCommand(&c.args), reply)
 }
 
+// Close closes the client releasing the managed red.Conn
 func (c *Client) Close() error {
 	var conn *Conn
 	conn, c.conn = c.conn, conn
@@ -35,13 +38,6 @@ func (c *Client) Close() error {
 	c.clear()
 	return nil
 }
-
-// func (c *Client) Reset(conn *Conn) {
-// 	c.conn, conn = conn, c.conn
-// 	if conn != nil {
-// 		_ = conn.Close()
-// 	}
-// }
 
 type clientQueued struct {
 	reply *clientReply
@@ -97,6 +93,7 @@ func (exec *clientExec) UnmarshalRESP(v resp.Value) error {
 	return nil
 }
 
+// Sync flushes all pending commands and reads all pending replies
 func (c *Client) Sync() error {
 	if c.conn == nil {
 		return fmt.Errorf("Client closed")

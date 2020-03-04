@@ -14,6 +14,7 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
+// Conn is a redis client connection
 type Conn struct {
 	noCopy noCopy //nolint:unused,structcheck
 
@@ -46,7 +47,7 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 		return fmt.Errorf("CLIENT commands not allowed")
 	}
 
-	if err := conn.w.WriteCommand(name, args...); err != nil {
+	if err := conn.w.WriteCommand(conn.options.KeyPrefix, name, args...); err != nil {
 		conn.closeWithError(err)
 		return err
 	}
@@ -298,7 +299,8 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 	default:
 		// NOTE: any write error in conn.cmd is sticky so it will be returned
 		// by the conn.WriteCommand call at the end of the function
-		_ = conn.w.WriteCommand("CLIENT", String("REPLY"), String("SKIP"))
+
+		_ = conn.w.WriteCommand(conn.options.KeyPrefix, "CLIENT", String("REPLY"), String("SKIP"))
 		conn.updatePipeline("CLIENT", String("REPLY"), String("SKIP"))
 		return conn.WriteCommand(name, args...)
 	}
@@ -428,6 +430,7 @@ func (conn *Conn) Auth(password string) error {
 	return nil
 }
 
+// Client handles over the connection to be managed by a red.Client
 func (conn *Conn) Client() (*Client, error) {
 	if conn.err != nil {
 		return nil, conn.err

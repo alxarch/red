@@ -60,6 +60,7 @@ func ParseURL(redisURL string) (*Pool, error) {
 	return &pool, nil
 }
 
+// DialFunc dials a red.Conn
 type DialFunc func() (*Conn, error)
 
 func dialURL(u *url.URL) (DialFunc, error) {
@@ -125,9 +126,6 @@ func WrapConn(conn net.Conn, options *ConnOptions) (*Conn, error) {
 		createdAt:  now,
 		lastUsedAt: now,
 		scripts:    make(map[Arg]string),
-		w: Writer{
-			KeyPrefix: options.KeyPrefix,
-		},
 	}
 	{
 		// Wire reader
