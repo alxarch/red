@@ -152,9 +152,9 @@ func Float32(f float32) Arg {
 // Lex creates a lex range argument (ie '[foo', '(foo')
 func Lex(lex string, inclusive bool) Arg {
 	if inclusive {
-		return Arg{typ: argLex, str: lex, num: 1}
+		return Arg{typ: argLex, str: lex, num: uint64('[')}
 	}
-	return Arg{typ: argLex, str: lex, num: 0}
+	return Arg{typ: argLex, str: lex, num: uint64('(')}
 }
 
 // Score creates an score range argument (ie '42.0', '(42.0')
@@ -233,32 +233,44 @@ type ArgBuilder struct {
 	args []Arg
 }
 
+// KV adds a key-value pair
 func (a *ArgBuilder) KV(key string, arg Arg) {
 	a.args = append(a.args, Key(key), arg)
 }
+
+// Key adds a key argument
 func (a *ArgBuilder) Key(key string) {
 	a.args = append(a.args, Key(key))
 }
+
+// Keys adds multiple key arguments
 func (a *ArgBuilder) Keys(keys ...string) {
 	for _, arg := range keys {
 		a.args = append(a.args, Key(arg))
 	}
 }
 
+// Field adds a field-value pair
 func (a *ArgBuilder) Field(name string, value Arg) {
 	a.args = append(a.args, String(name), value)
 }
 
+// String adds a string argument
 func (a *ArgBuilder) String(str string) {
 	a.args = append(a.args, String(str))
 }
+
+// Int adds an integer argument
 func (a *ArgBuilder) Int(n int64) {
 	a.args = append(a.args, Int64(n))
 }
+
+// Float adds a float argument
 func (a *ArgBuilder) Float(f float64) {
 	a.args = append(a.args, Float64(f))
 }
 
+// Score adds a score range argument
 func (a *ArgBuilder) Score(score float64, include bool) {
 	if include {
 		a.Float(score)
@@ -267,22 +279,28 @@ func (a *ArgBuilder) Score(score float64, include bool) {
 	}
 }
 
+// Option adds an optional argument with a value
 func (a *ArgBuilder) Option(option, value string) {
 	if value != "" {
 		a.args = append(a.args, String(option), String(value))
 	}
 }
 
+// Flag adds an optional flag if ok is true
 func (a *ArgBuilder) Flag(flag string, ok bool) {
 	if ok {
 		a.String(flag)
 	}
 }
+
+// Strings adds multiple string arguments
 func (a *ArgBuilder) Strings(args ...string) {
 	for _, arg := range args {
 		a.args = append(a.args, String(arg))
 	}
 }
+
+// Unique adds multiple string arguments omitting the first argument of args if it's equal to arg
 func (a *ArgBuilder) Unique(arg string, args ...string) {
 	a.String(arg)
 	if len(args) > 0 {
@@ -293,38 +311,49 @@ func (a *ArgBuilder) Unique(arg string, args ...string) {
 		a.Strings(tail...)
 	}
 }
+
+// Arg adds an argument
 func (a *ArgBuilder) Arg(arg Arg) {
 	a.args = append(a.args, arg)
 }
+
+// Append adds multiple arguments
 func (a *ArgBuilder) Append(args ...Arg) {
 	a.args = append(a.args, args...)
 }
 
+// Len returns the number of arguments
 func (a *ArgBuilder) Len() int {
 	return len(a.args)
 }
 
-func (b *ArgBuilder) Reset() {
-	b.args = b.args[:0]
+// Reset resets args to empty
+func (a *ArgBuilder) Reset() {
+	a.args = a.args[:0]
 }
 
-func (b *ArgBuilder) Clear() {
-	args := b.args[:cap(b.args)]
+// Clear resets args to empty and releases strings for GC
+func (a *ArgBuilder) Clear() {
+	args := a.args[:cap(a.args)]
 	for i := range args {
 		args[i] = Arg{}
 	}
-	b.args = args[:0]
+	a.args = args[:0]
 }
 
-func (b *ArgBuilder) Swap(args []Arg) []Arg {
-	b.args, args = args, b.args
+// Swap swaps args in a builder
+func (a *ArgBuilder) Swap(args []Arg) []Arg {
+	a.args, args = args, a.args
 	return args
 }
-func (b *ArgBuilder) Args() (args []Arg) {
-	b.args, args = args, b.args
+
+// Args returns the current args in a builder
+func (a *ArgBuilder) Args() (args []Arg) {
+	a.args, args = args, a.args
 	return
 }
 
+// QuickArgs makes a slice of args where the first is a key and the reset strings
 func QuickArgs(key string, args ...string) []Arg {
 	out := make([]Arg, len(args)+1)
 	str := out[1:]
@@ -344,6 +373,7 @@ type Writer struct {
 	scratch []byte // Reusable buffer used for numeric conversions on args
 }
 
+// WriteCommand writes a redis command
 func (w *Writer) WriteCommand(keyPrefix, name string, args ...Arg) error {
 	if err := w.dest.WriteArray(int64(len(args) + 1)); err != nil {
 		return err
@@ -354,12 +384,17 @@ func (w *Writer) WriteCommand(keyPrefix, name string, args ...Arg) error {
 	return w.WriteArgs(keyPrefix, args...)
 }
 
+// Flush flushes the underlying writer
 func (w *Writer) Flush() error {
 	return w.dest.Flush()
 }
+
+// Reset resets the underlying writer
 func (w *Writer) Reset(dest *resp.Writer) {
 	w.dest = dest
 }
+
+// WriteArgs writes args as bulk strings to the underlying writer
 func (w *Writer) WriteArgs(keyPrefix string, args ...Arg) (err error) {
 	resp := w.dest
 	for i := range args {

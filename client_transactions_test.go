@@ -44,10 +44,10 @@ func TestClient_Multi(t *testing.T) {
 		t.Errorf("WATCH failed %s", err)
 	}
 
-	// Do a read command outside MULTI (using Batch.Tee())
+	// Do a read command outside MULTI (using Batch.Bind())
 	var bar int64
-	p.HGet("foo", "bar").Tee(&bar)
-	// p.CommandRESP("HGET", resp.Key("foo"), resp.String("bar")).Tee(&bar)
+	p.HGet("foo", "bar").Bind(&bar)
+	// p.CommandRESP("HGET", resp.Key("foo"), resp.String("bar")).Bind(&bar)
 
 	if err := p.Sync(); err != nil {
 		t.Errorf("HGET failed %s", err)
@@ -65,7 +65,7 @@ func TestClient_Multi(t *testing.T) {
 			p.Multi()
 			p.HIncrBy("foo", "bar", 2)
 			p.HIncrBy("foo", "bar", 2)
-			p.HIncrBy("foo", "bar", 2).Tee(&n)
+			p.HIncrBy("foo", "bar", 2).Bind(&n)
 			p.Exec()
 		}()
 		if n != 7 {
@@ -78,7 +78,7 @@ func TestClient_Multi(t *testing.T) {
 	var n int64
 	p.Multi()
 	hset := p.HSet("foo", "bar", "43")
-	hset.Tee(&n)
+	hset.Bind(&n)
 	multi := p.Exec()
 
 	// There should be no error on the task
@@ -138,9 +138,9 @@ func TestClient_Multi(t *testing.T) {
 // 			flush resp.SimpleString
 // 		)
 // 		sel := p.Select(10)
-// 		p.Set("foo", "bar", 0).Tee(&set)
-// 		p.Keys("*").Tee(&keys)
-// 		p.FlushDB(false).Tee(&flush)
+// 		p.Set("foo", "bar", 0).Bind(&set)
+// 		p.Keys("*").Bind(&keys)
+// 		p.FlushDB(false).Bind(&flush)
 // 		if err := p.Sync(); err != nil {
 // 			t.Errorf("Failed to execute pipeline: %s", err)
 // 		}

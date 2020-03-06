@@ -1,10 +1,7 @@
 package red
 
 import (
-	"fmt"
 	"time"
-
-	"github.com/alxarch/red/resp"
 )
 
 // Keys
@@ -13,55 +10,43 @@ import (
 func (c *Client) Del(key string, keys ...string) *ReplyInteger {
 	c.args.Key(key)
 	c.args.Keys(keys...)
-	reply := ReplyInteger{}
-	c.do("DEL", &reply)
-	return &reply
+	return c.doInteger("DEL")
 }
 
 // Dump adds a DUMP command
 func (c *Client) Dump(key string) *ReplyBulkString {
-	reply := ReplyBulkString{}
 	c.args.Key(key)
-	c.do("DUMP", &reply)
-	return &reply
+	return c.doBulkString("DUMP")
 }
 
 // Exists is redis EXISTS command
 func (c *Client) Exists(keys ...string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Keys(keys...)
-	c.do("EXISTS", &reply)
-	return &reply
+	return c.doInteger("EXISTS")
 }
 
 // Expire is redis EXPIRE command
 func (c *Client) Expire(key string, ttl time.Duration) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
 	c.args.Arg(Seconds(ttl))
-	c.do("EXPIRE", &reply)
-	return &reply
+	return c.doInteger("EXPIRE")
 }
 
 // ExpireAt is redis EXPIREAT command
 func (c *Client) ExpireAt(key string, tm time.Time) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
 	c.args.Arg(UnixSeconds(tm))
-	c.do("EXPIREAT", &reply)
-	return &reply
+	return c.doInteger("EXPIREAT")
 }
 
 // Keys returns all keys matching a pattern
 func (c *Client) Keys(pattern string) *ReplyBulkStringArray {
-	reply := ReplyBulkStringArray{}
 	if pattern == "" {
 		pattern = "*"
 	}
 	c.args.String("MATCH")
 	c.args.String(pattern)
-	c.do("KEYS", &reply)
-	return &reply
+	return c.doBulkStringArray("KEYS")
 }
 
 // Migrate moves data across servers
@@ -78,8 +63,6 @@ type Migrate struct {
 
 // Migrate moves data across servers
 func (c *Client) Migrate(m Migrate) *ReplyOK {
-	reply := ReplyOK{}
-	c.do("MIGRATE", &reply)
 	c.args.String(m.Host)
 	c.args.Int(int64(m.Port))
 	c.args.String("")
@@ -90,120 +73,94 @@ func (c *Client) Migrate(m Migrate) *ReplyOK {
 	c.args.Option("AUTH", m.Auth)
 	c.args.String("KEYS")
 	c.args.Keys(m.Keys...)
-	return &reply
+	return c.doSimpleStringOK("MIGRATE", 0)
 }
 
 // Move moves a key to a different DB index
 func (c *Client) Move(key string, db int) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
 	c.args.Int(int64(db))
-	c.do("MOVE", &reply)
-	return &reply
+	return c.doInteger("MOVE")
 }
 
 // ObjectRefCount is the redis' OBJECT REFCOUNT command
 func (c *Client) ObjectRefCount(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.String("REFCOUNT")
 	c.args.Key(key)
-	c.do("OBJECT", &reply)
-	return &reply
+	return c.doInteger("OBJECT")
 }
 
 // ObjectEncoding is the redis' OBJECT ENCODING command
 func (c *Client) ObjectEncoding(key string) *ReplyBulkString {
-	reply := ReplyBulkString{}
 	c.args.String("ENCODING")
 	c.args.Key(key)
-	c.do("OBJECT", &reply)
-	return &reply
+	return c.doBulkString("OBJECT")
 }
 
 // ObjectIdleTime is the redis' OBJECT IDLETIME command
 func (c *Client) ObjectIdleTime(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.String("IDLETIME")
 	c.args.Key(key)
-	c.do("OBJECT", &reply)
-	return &reply
+	return c.doInteger("OBJECT")
 }
 
 // ObjectFreq is the redis' OBJECT FREQ command
 func (c *Client) ObjectFreq(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.String("FREQ")
 	c.args.Key(key)
-	c.do("OBJECT", &reply)
-	return &reply
+	return c.doInteger("OBJECT")
 }
 
 // ObjectHelp is the redis' OBJECT HELP command
 func (c *Client) ObjectHelp(key string) *ReplyBulkString {
-	reply := ReplyBulkString{}
 	c.args.String("HELP")
 	c.args.Key(key)
-	c.do("OBJECT", &reply)
-	return &reply
+	return c.doBulkString("OBJECT")
 }
 
 // Persist removes any TTL from a key
 func (c *Client) Persist(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
-	c.do("PERSIST", &reply)
-	return &reply
+	return c.doInteger("PERSIST")
 }
 
 // PExpire adds a TTL to a key in milliseconds
 func (c *Client) PExpire(key string, ttl time.Duration) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
 	c.args.Arg(Milliseconds(ttl))
-	c.do("PEXPIRE", &reply)
-	return &reply
+	return c.doInteger("PEXPIRE")
 }
 
 // PExpireAt is redis PEXPIREAT command
 func (c *Client) PExpireAt(key string, tm time.Time) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
 	c.args.Arg(UnixSeconds(tm))
-	c.do("PEXPIREAT", &reply)
-	return &reply
+	return c.doInteger("PEXPIREAT")
 }
 
 // PTTL gets the TTL of a key in milliseconds
 func (c *Client) PTTL(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
-	c.do("PTTL", &reply)
-	return &reply
+	return c.doInteger("PTTL")
 }
 
 // RandomKey returns a random key
 func (c *Client) RandomKey() *ReplyBulkString {
-	reply := ReplyBulkString{}
-	c.do("RANDOMKEY", &reply)
-	return &reply
+	return c.doBulkString("RANDOMKEY")
 }
 
 // Rename renames a key
 func (c *Client) Rename(key, newkey string) *ReplyOK {
-	reply := ReplyOK{}
 	c.args.Key(key)
 	c.args.Key(newkey)
-	c.do("RENAME", &reply)
-	return &reply
+	return c.doSimpleStringOK("RENAME", 0)
 }
 
 // RenameNX renames a key if the new name does not exist
 func (c *Client) RenameNX(key, newkey string) *ReplyOK {
-	reply := ReplyOK{}
 	c.args.Key(key)
 	c.args.Key(newkey)
-	c.do("RENAMENX", &reply)
-	return &reply
+	return c.doSimpleStringOK("RENAMENX", NX)
 }
 
 // Restore restores a key value from a string
@@ -219,7 +176,6 @@ type Restore struct {
 
 // Restore restores a key value from a string
 func (c *Client) Restore(r Restore) *ReplyOK {
-	reply := ReplyOK{}
 	args := &c.args
 	args.Key(r.Key)
 	args.Arg(Milliseconds(r.TTL))
@@ -236,8 +192,7 @@ func (c *Client) Restore(r Restore) *ReplyOK {
 	if r.Frequency > 0 {
 		args.Append(String("FREQ"), Int64(r.Frequency))
 	}
-	c.do("RESTORE", &reply)
-	return &reply
+	return c.doSimpleStringOK("RESTORE", 0)
 }
 
 // Sort sorts keys
@@ -248,7 +203,6 @@ type Sort struct {
 	Get          []string
 	Order        SortOrder
 	Alphanumeric bool
-	Store        string
 }
 
 // SortOrder defines sorting order
@@ -273,46 +227,8 @@ func (o SortOrder) String() string {
 
 }
 
-// ReplySort is the reply of redis' SORT command
-type ReplySort struct {
-	Sort
-	sorted resp.BulkStringArray
-	stored resp.Integer
-	replyBase
-}
-
-// Reply returns the SORT reply
-func (r *ReplySort) Reply() ([]string, int64, error) {
-	return r.sorted, int64(r.stored), r.err
-}
-
-// UnmarshalRESP implements resp.Unmarshaler interface
-func (r *ReplySort) reply(v resp.Value) error {
-	defer r.tee(v)
-	switch v.Type() {
-	case resp.TypeArray:
-		if r.Store == "" {
-			r.err = v.Decode(&r.sorted)
-			return nil
-		}
-	case resp.TypeInteger:
-		if r.Store != "" {
-			r.err = v.Decode(&r.stored)
-			return nil
-		}
-	case resp.TypeError:
-		r.err = v.Err()
-		return nil
-	}
-	r.err = fmt.Errorf("Invalid sort reply %v", v)
-	return nil
-}
-
 // Sort sorts a key's values
-func (c *Client) Sort(key string, sort Sort) *ReplySort {
-	reply := ReplySort{
-		Sort: sort,
-	}
+func (c *Client) Sort(key string, sort Sort) *ReplyBulkStringArray {
 	args := &c.args
 	args.Key(key)
 	args.Key(key)
@@ -335,51 +251,65 @@ func (c *Client) Sort(key string, sort Sort) *ReplySort {
 	if sort.Alphanumeric {
 		args.String("ALPHA")
 	}
-	if sort.Store != "" {
-		args.String("STORE")
-		args.Key(sort.Store)
+	return c.doBulkStringArray("SORT")
+}
+
+// SortStore sorts a `key`'s value storing the result in `dest`
+func (c *Client) SortStore(dest, key string, sort Sort) *ReplyInteger {
+	args := &c.args
+	args.Key(key)
+	args.Key(key)
+	if sort.By != "" {
+		args.String("BY")
+		args.String(sort.By)
 	}
-	c.do("SORT", &reply)
-	return &reply
+	if sort.Count > 0 {
+		args.String("LIMIT")
+		args.Int(sort.Offset)
+		args.Int(sort.Count)
+	}
+	for i := range sort.Get {
+		args.String("GET")
+		args.String(sort.Get[i])
+	}
+	if ord := sort.Order.String(); ord != "" {
+		args.String(ord)
+	}
+	if sort.Alphanumeric {
+		args.String("ALPHA")
+	}
+	args.String("STORE")
+	args.Key(dest)
+	return c.doInteger("SORT")
 }
 
 // Touch alters the last access time of a key(s).
 func (c *Client) Touch(keys ...string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Keys(keys...)
-	c.do("TOUCH", &reply)
-	return &reply
+	return c.doInteger("TOUCH")
 }
 
 // TTL returns the remaining lifetime of a key in seconds
 func (c *Client) TTL(key string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Key(key)
-	c.do("TTL", &reply)
-	return &reply
+	return c.doInteger("TTL")
 }
 
 // Type returns the type of the value of a key
 func (c *Client) Type(key string) *ReplySimpleString {
-	reply := ReplySimpleString{}
 	c.args.Key(key)
-	c.do("TYPE", &reply)
-	return &reply
+	return c.doSimpleString("TYPE")
 }
 
 // Unlink drops keys
 func (c *Client) Unlink(keys ...string) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Keys(keys...)
-	c.do("UNLINK", &reply)
-	return &reply
+	return c.doInteger("UNLINK")
 }
 
 // Wait blocks until a number of replicas have stored the data or timeout occured
 func (c *Client) Wait(numReplicas int, timeout time.Duration) *ReplyInteger {
-	reply := ReplyInteger{}
 	c.args.Int(int64(numReplicas))
 	c.args.Arg(Milliseconds(timeout))
-	c.do("WAIT", &reply)
-	return &reply
+	return c.doInteger("WAIT")
 }

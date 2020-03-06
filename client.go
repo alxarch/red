@@ -1,6 +1,7 @@
 package red
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/alxarch/red/resp"
@@ -10,20 +11,15 @@ import (
 type Client struct {
 	conn    *Conn
 	args    ArgBuilder
-	replies []clientReply
+	replies []*clientReply
 }
 
 // Do writes a redis command and binds the reply to dest
 func (c *Client) Do(dest interface{}, cmd CommandBuilder) {
-	var reply batchReply
-	if r, ok := dest.(batchReply); ok {
-		reply = r
-	} else {
-		r := replyBase{}
-		r.Tee(dest)
-		reply = &r
+	reply := clientReply{
+		dest: dest,
 	}
-	c.do(cmd.BuildCommand(&c.args), reply)
+	c.do(cmd.BuildCommand(&c.args), &reply)
 }
 
 // Close closes the client releasing the managed red.Conn
@@ -55,7 +51,7 @@ func (q *clientQueued) UnmarshalRESP(v resp.Value) error {
 }
 
 type clientExec struct {
-	queued []batchReply
+	queued []*clientReply
 	reply  *clientReply
 }
 
@@ -101,9 +97,9 @@ func (c *Client) Sync() error {
 	c.conn.unmanage()
 	defer c.conn.manage()
 	defer c.clear()
-	var multi []batchReply
+	var multi []*clientReply
 	for i := range c.replies {
-		r := &c.replies[i]
+		r := c.replies[i]
 		entry, value, err := c.conn.clientReadValue()
 		switch {
 		case err != nil:
@@ -119,7 +115,7 @@ func (c *Client) Sync() error {
 			err = exec.UnmarshalRESP(value)
 			multi = multi[:0]
 		case entry.Queued():
-			multi = append(multi, r.batchReply)
+			multi = append(multi, r)
 			q := clientQueued{
 				reply: r,
 			}
@@ -133,7 +129,7 @@ func (c *Client) Sync() error {
 		if err != nil {
 			tail := c.replies[i:]
 			for i := range tail {
-				r := &tail[i]
+				r := tail[i]
 				r.reject(err)
 			}
 			return err
@@ -143,7 +139,12 @@ func (c *Client) Sync() error {
 
 }
 
-func (c *Client) do(cmd string, reply batchReply) {
+// ErrReplyPending is the error of a reply until a `Client.Sync` is called
+var ErrReplyPending = errors.New("Reply pending")
+
+func (c *Client) do(cmd string, reply *clientReply) {
+	reply.cmd = cmd
+	reply.err = ErrReplyPending
 	c.conn.unmanage()
 	defer c.conn.manage()
 	err := c.conn.WriteCommand(cmd, c.args.Args()...)
@@ -152,25 +153,60 @@ func (c *Client) do(cmd string, reply batchReply) {
 		reply.reject(err)
 		return
 	}
-	c.replies = append(c.replies, clientReply{cmd, reply})
+	c.replies = append(c.replies, reply)
+}
+
+func (c *Client) doBulkStringArray(cmd string) *ReplyBulkStringArray {
+	reply := ReplyBulkStringArray{}
+	reply.Bind(&reply.values)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+}
+func (c *Client) doFloat(cmd string) *ReplyFloat {
+	reply := ReplyFloat{}
+	reply.Bind(&reply.f)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+}
+func (c *Client) doBool(cmd string) *ReplyBool {
+	reply := ReplyBool{}
+	reply.Bind(&reply.n)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+
+}
+func (c *Client) doSimpleString(cmd string) *ReplySimpleString {
+	reply := ReplySimpleString{}
+	reply.Bind(&reply.status)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+}
+
+func (c *Client) doBulkString(cmd string) *ReplyBulkString {
+	reply := ReplyBulkString{}
+	reply.Bind(&reply.str)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+}
+
+func (c *Client) doSimpleStringOK(cmd string, mode Mode) *ReplyOK {
+	reply := ReplyOK{ok: AssertOK{Mode: mode}}
+	reply.Bind(&reply.ok)
+	c.do(cmd, &reply.clientReply)
+	return &reply
+}
+
+func (c *Client) doInteger(cmd string) *ReplyInteger {
+	reply := ReplyInteger{}
+	reply.Bind(&reply.n)
+	c.do(cmd, &reply.clientReply)
+	return &reply
 }
 
 func (c *Client) clear() {
 	for i := range c.replies {
-		c.replies[i] = clientReply{}
+		c.replies[i] = nil
 	}
 	c.args.Clear()
 	c.replies = c.replies[:0]
-}
-
-type clientReply struct {
-	cmd string
-	batchReply
-}
-
-func (r *clientReply) UnmarshalRESP(v resp.Value) error {
-	if r.batchReply == nil {
-		return fmt.Errorf("BUG: Invalid client reply")
-	}
-	return r.batchReply.reply(v)
 }

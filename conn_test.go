@@ -139,7 +139,7 @@ func TestConn_Multi(t *testing.T) {
 			t.Fatal(err)
 		}
 		var bar string
-		client.GetSet("foo", "baz").Tee(&bar)
+		client.GetSet("foo", "baz").Bind(&bar)
 		if err := client.Sync(); err != nil {
 			t.Errorf("GETSET failed %s", err)
 		}

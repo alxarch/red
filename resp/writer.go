@@ -191,8 +191,8 @@ func (w *Writer) WriteBulkStringBytes(s []byte) error {
 	if err := w.Flush(); err != nil {
 		return err
 	}
-	b = appendBulkStringHeader(b, len(s))
-	w.buffer, s = fillBytes(b, s)
+	w.buffer = appendBulkStringHeader(w.buffer, len(s))
+	w.buffer, s = fillBytes(w.buffer, s)
 	for len(s) > 0 {
 		if err := w.Flush(); err != nil {
 			return err
@@ -211,10 +211,14 @@ func (w *Writer) WriteBulkStringBytes(s []byte) error {
 }
 
 func fillString(b []byte, s string) ([]byte, string) {
-	return b[0:cap(b)], s[copy(b[len(b):cap(b)], s):]
+	out := b[:cap(b)]
+	n := copy(out[len(b):], s)
+	return out[:len(b)+n], s[n:]
 }
 func fillBytes(b []byte, s []byte) ([]byte, []byte) {
-	return b[0:cap(b)], s[copy(b[len(b):cap(b)], s):]
+	out := b[:cap(b)]
+	n := copy(out[len(b):], s)
+	return out[:len(b)+n], s[n:]
 }
 
 // WriteError writes `s` as a RESP error string

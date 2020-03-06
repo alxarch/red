@@ -49,7 +49,7 @@ func Test_Pool(t *testing.T) {
 			var n resp.Integer
 			{
 				hset := p.HSet(key, field, "baz")
-				hset.Tee(&n)
+				hset.Bind(&n)
 				p.Sync()
 				n, err := hset.Reply()
 				if err != nil {

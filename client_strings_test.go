@@ -17,32 +17,32 @@ func TestAPI_Strings(t *testing.T) {
 	p.Set("foo", "bar", 0)
 	p.Append("foo", "baz")
 	var foo string
-	p.Get("foo").Tee(&foo)
+	p.Get("foo").Bind(&foo)
 	var baz string
-	p.GetRange("foo", 3, 8).Tee(&baz)
+	p.GetRange("foo", 3, 8).Bind(&baz)
 	var barfoo string
-	p.SetRange("foo", 3, "foo").Tee(&barfoo)
-	p.GetSet("foo", "foobar").Tee(&barfoo)
+	p.SetRange("foo", 3, "foo").Bind(&barfoo)
+	p.GetSet("foo", "foobar").Bind(&barfoo)
 	var n6 int64
-	p.StrLen("foo").Tee(&n6)
+	p.StrLen("foo").Bind(&n6)
 	p.Set("bar", "42", 0)
 	var n43 int64
-	p.Incr("bar").Tee(&n43)
+	p.Incr("bar").Bind(&n43)
 	var n42 int64
-	p.Decr("bar").Tee(&n42)
+	p.Decr("bar").Bind(&n42)
 	var n52 int64
-	p.IncrBy("bar", 10).Tee(&n52)
+	p.IncrBy("bar", 10).Bind(&n52)
 	var n32 int64
-	p.DecrBy("bar", 20).Tee(&n32)
+	p.DecrBy("bar", 20).Bind(&n32)
 	var f42 float64
-	p.IncrByFloat("bar", 10.0).Tee(&f42)
+	p.IncrByFloat("bar", 10.0).Bind(&f42)
 	var values []string
 	p.MSet(
 		"foo", "bar",
 		"bar", "baz",
 		"baz", "foo",
 	)
-	p.MGet("foo", "bar", "baz").Tee(&values)
+	p.MGet("foo", "bar", "baz").Bind(&values)
 	if err := p.Sync(); err != nil {
 		t.Errorf("Exec failed %s", err)
 	}

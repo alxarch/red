@@ -47,7 +47,7 @@ func TestAPI_Hashes(t *testing.T) {
 	}()
 	p.HSet("foo", "foo", "bar", "bar", "baz", "baz", "foo")
 	var fields map[string]string
-	p.HGetAll("foo").Tee(&fields)
+	p.HGetAll("foo").Bind(&fields)
 	defer func() {
 		if !reflect.DeepEqual(fields, map[string]string{
 			"foo": "bar",

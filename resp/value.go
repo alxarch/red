@@ -291,39 +291,76 @@ func (v Value) AppendRESP(buf []byte) []byte {
 	return buf
 }
 
-// EachKV calls fn for each key/value pair in an array
-func (v Value) EachKV(fn func(k, v string) error) (err error) {
-	if h := v.hint(); h != nil && h.typ == TypeArray {
-		if h.null {
+func (v Value) Each(fn func(v string) error) error {
+	offset, size, err := v.nonNullArray()
+	if err != nil {
+		return err
+	}
+	end := offset + size
+	var val BulkString
+	for v.index = offset; v.index < end; v.index++ {
+		if err := val.UnmarshalRESP(v); err != nil {
+			return err
+		}
+		if !val.Valid {
 			return ErrNull
 		}
-		if h.size%2 != 0 {
-			return fmt.Errorf("Invalid array size %d", h.size)
+		if err := fn(val.String); err != nil {
+			return err
 		}
-		v.index = h.offset
-		var key, val BulkString
-		for i := uint32(0); i < h.size; i += 2 {
-			v.index++
-			if err := key.UnmarshalRESP(v); err != nil {
-				return err
-			}
-			if !key.Valid {
-				return ErrNull
-			}
-			v.index++
-			if err := val.UnmarshalRESP(v); err != nil {
-				return err
-			}
-			if !val.Valid {
-				return ErrNull
-			}
-			if err := fn(key.String, val.String); err != nil {
-				return err
-			}
-		}
-		return
 	}
-	return fmt.Errorf("Invalid RESP value %v", v.Any())
+	return nil
+}
+func (v Value) nonNullArray() (offset, size uint32, err error) {
+	if h := v.hint(); h != nil {
+		switch h.typ {
+		case TypeArray:
+			if h.null {
+				err = ErrNull
+			} else {
+				offset, size = h.offset, h.size
+			}
+			return
+		case TypeError:
+			err = Error(v.reply.str(h))
+			return
+		}
+	}
+	err = fmt.Errorf("Invalid RESP value %v", v.Any())
+	return
+}
+
+// EachKV calls fn for each key/value pair in an array
+func (v Value) EachKV(fn func(k, v string) error) error {
+	offset, size, err := v.nonNullArray()
+	if err != nil {
+		return err
+	}
+	if size%2 != 0 {
+		return fmt.Errorf("Invalid array size %d", size)
+	}
+	v.index = offset
+	end := offset + size
+	var key, val BulkString
+	for v.index = offset; v.index < end; v.index++ {
+		if err := key.UnmarshalRESP(v); err != nil {
+			return err
+		}
+		if !key.Valid {
+			return ErrNull
+		}
+		v.index++
+		if err := val.UnmarshalRESP(v); err != nil {
+			return err
+		}
+		if !val.Valid {
+			return ErrNull
+		}
+		if err := fn(key.String, val.String); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Iter iterates over an array of RESP values
