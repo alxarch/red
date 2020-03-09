@@ -9,26 +9,27 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
-func dialer() func() (*red.Client, error) {
+func dialer() func() (*red.Conn, error) {
 	var pool *red.Pool
 	now := time.Now().UnixNano()
 	url := fmt.Sprintf("redis://:6379/1?wait-timeout=1s&max-connections=2&max-idle-time=1s&key-prefix=%d-", now)
 	pool, err := red.ParseURL(url)
 	if err != nil {
-		return func() (*red.Client, error) {
+		return func() (*red.Conn, error) {
 			return nil, err
 		}
 	}
-	return pool.Client
+	return pool.Get
 }
 
 func TestClient_Multi(t *testing.T) {
 	dial := dialer()
-	p, err := dial()
+	conn, err := dial()
 	if err != nil {
 		t.Fatalf("Dial failed %s", err)
 	}
-	defer p.Sync()
+	p := new(red.Batch)
+	defer conn.DoBatch(p)
 	defer p.FlushDB(false)
 
 	// Initalize the key 'foo' and set WATCH on the first connection
@@ -40,7 +41,7 @@ func TestClient_Multi(t *testing.T) {
 	// Watch for changes on `foo`
 	p.Watch("foo")
 
-	if err := p.Sync(); err != nil {
+	if err := conn.DoBatch(p); err != nil {
 		t.Errorf("WATCH failed %s", err)
 	}
 
@@ -49,7 +50,7 @@ func TestClient_Multi(t *testing.T) {
 	p.HGet("foo", "bar").Bind(&bar)
 	// p.CommandRESP("HGET", resp.Key("foo"), resp.String("bar")).Bind(&bar)
 
-	if err := p.Sync(); err != nil {
+	if err := conn.DoBatch(p); err != nil {
 		t.Errorf("HGET failed %s", err)
 	}
 
@@ -59,15 +60,20 @@ func TestClient_Multi(t *testing.T) {
 
 	{
 		var n int64
-		p, _ := dial()
-		func() {
-			defer p.Sync()
-			p.Multi()
-			p.HIncrBy("foo", "bar", 2)
-			p.HIncrBy("foo", "bar", 2)
-			p.HIncrBy("foo", "bar", 2).Bind(&n)
-			p.Exec()
-		}()
+		conn, _ := dial()
+		defer conn.Close()
+		p := new(red.Batch)
+		p.Multi()
+		p.HIncrBy("foo", "bar", 2)
+		p.HIncrBy("foo", "bar", 2)
+		p.HIncrBy("foo", "bar", 2).Bind(&n)
+		exec := p.Exec()
+		if err := conn.DoBatch(p); err != nil {
+			t.Errorf("Batch failed %s", err)
+		}
+		if _, err := exec.Reply(); err != nil {
+			t.Errorf("EXEC failed %s", err)
+		}
 		if n != 7 {
 			t.Errorf("TASK did not do all %d", n)
 		}
@@ -82,12 +88,12 @@ func TestClient_Multi(t *testing.T) {
 	multi := p.Exec()
 
 	// There should be no error on the task
-	if err := p.Sync(); err != nil {
+	if err := conn.DoBatch(p); err != nil {
 		t.Errorf("Multi failed %s", err)
 	}
 
 	// But HSET should fail because it was inside MULTI
-	if _, err := multi.Reply(); err != resp.ErrNull {
+	if err := multi.Err(); err != resp.ErrNull {
 		t.Errorf("MULTI err %s", err)
 	}
 	if n, err := hset.Reply(); err == nil {
@@ -97,11 +103,11 @@ func TestClient_Multi(t *testing.T) {
 		t.Errorf("HSET err %s", err)
 	}
 
-	p.Sync()
+	conn.DoBatch(p)
 
 	// Check the values
 	hget := p.HGet("foo", "bar")
-	if err := p.Sync(); err != nil {
+	if err := conn.DoBatch(p); err != nil {
 		t.Errorf("Multi failed %s", err)
 	}
 	result, err := hget.Reply()
@@ -111,7 +117,7 @@ func TestClient_Multi(t *testing.T) {
 	if result != "7" {
 		t.Errorf("HGET value invalid %q", result)
 	}
-	p.Sync()
+	conn.DoBatch(p)
 
 }
 

@@ -9,11 +9,12 @@ import (
 
 func TestClient_SortedSets(t *testing.T) {
 	dial := dialer()
-	p, err := dial()
+	conn, err := dial()
 	if err != nil {
 		t.Fatalf("Dial failed %s", err)
 	}
-	defer p.Sync()
+	p := new(red.Batch)
+	defer conn.DoBatch(p)
 	defer p.FlushDB(false)
 
 	zadd := p.ZAdd("foo", 0, red.Z("foo", 1.0), red.Z("bar", 2.0), red.Z("baz", 3.0))
@@ -250,6 +251,6 @@ func TestClient_SortedSets(t *testing.T) {
 			t.Errorf("ZREVRANGEBYLEX invalid entries %v", entries)
 		}
 	}()
-	defer p.Sync()
+	defer conn.DoBatch(p)
 
 }

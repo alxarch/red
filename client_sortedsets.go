@@ -8,99 +8,99 @@ import (
 )
 
 // BZPopMin is the blocking version of ZPOPMIN
-func (c *Client) BZPopMin(timeout time.Duration, keys ...string) *ReplyZPop {
-	c.args.Keys(keys...)
-	c.args.Arg(Milliseconds(timeout))
-	return c.doZPop("BZPOPMIN")
+func (b *batchAPI) BZPopMin(timeout time.Duration, keys ...string) *ReplyZPop {
+	b.args.Keys(keys...)
+	b.args.Arg(Milliseconds(timeout))
+	return b.doZPop("BZPOPMIN")
 }
 
 // BZPopMax is the blocking version of ZPopMax
-func (c *Client) BZPopMax(timeout time.Duration, keys ...string) *ReplyZPop {
-	c.args.Keys(keys...)
-	c.args.Arg(Milliseconds(timeout))
-	return c.doZPop("BZPOPMAX")
+func (b *batchAPI) BZPopMax(timeout time.Duration, keys ...string) *ReplyZPop {
+	b.args.Keys(keys...)
+	b.args.Arg(Milliseconds(timeout))
+	return b.doZPop("BZPOPMAX")
 }
 
 // ZAdd adds or modifies the a member of a sorted set
-func (c *Client) ZAdd(key string, mode Mode, members ...ZEntry) *ReplyInteger {
-	c.args.Key(key)
-	c.argZAdd(mode &^ INCR)
+func (b *batchAPI) ZAdd(key string, mode Mode, members ...ZEntry) *ReplyInteger {
+	b.args.Key(key)
+	b.argZAdd(mode &^ INCR)
 	for i := range members {
 		m := &members[i]
-		c.args.Float(m.Score)
-		c.args.String(m.Member)
+		b.args.Float(m.Score)
+		b.args.String(m.Member)
 	}
-	return c.doInteger("ZADD")
+	return b.doInteger("ZADD")
 }
 
 // ZAddIncr increments the score of a sorted set member by d
-func (c *Client) ZAddIncr(key string, mode Mode, member string, d float64) *ReplyFloat {
-	c.args.Key(key)
-	c.argZAdd(mode | INCR)
-	c.args.Float(d)
-	c.args.String(member)
-	return c.doFloat("ZADD")
+func (b *batchAPI) ZAddIncr(key string, mode Mode, member string, d float64) *ReplyFloat {
+	b.args.Key(key)
+	b.argZAdd(mode | INCR)
+	b.args.Float(d)
+	b.args.String(member)
+	return b.doFloat("ZADD")
 }
 
 // ZCard returns the cardinality of a sorted set
-func (c *Client) ZCard(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("ZCARD")
+func (b *batchAPI) ZCard(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("ZCARD")
 }
 
-func (c *Client) argZAdd(mode Mode) {
+func (b *batchAPI) argZAdd(mode Mode) {
 	if mode.NX() {
-		c.args.String("NX")
+		b.args.String("NX")
 	} else if mode.XX() {
-		c.args.String("XX")
+		b.args.String("XX")
 	}
 	if mode.CH() {
-		c.args.String("CH")
+		b.args.String("CH")
 	}
 	if mode.INCR() {
-		c.args.String("INCR")
+		b.args.String("INCR")
 	}
 }
 
 // ZCount returns the number of elements in the sorted set at key with a score between min and max.
-func (c *Client) ZCount(key string, min, max Arg) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Append(min, max)
-	return c.doInteger("ZCOUNT")
+func (b *batchAPI) ZCount(key string, min, max Arg) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Append(min, max)
+	return b.doInteger("ZCOUNT")
 }
 
 // ZIncrBy increments the score of member in the sorted set stored at key by increment.
-func (c *Client) ZIncrBy(key string, incr float64, member string) *ReplyFloat {
-	c.args.Key(key)
-	c.args.Float(incr)
-	c.args.String(member)
-	return c.doFloat("ZINCRBY")
+func (b *batchAPI) ZIncrBy(key string, incr float64, member string) *ReplyFloat {
+	b.args.Key(key)
+	b.args.Float(incr)
+	b.args.String(member)
+	return b.doFloat("ZINCRBY")
 }
 
 // ZLexCount returns the number of elements in the sorted set at key with a value between min and max.
-func (c *Client) ZLexCount(key string, min, max Arg) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Arg(min)
-	c.args.Arg(max)
-	return c.doInteger("ZLEXCOUNT")
+func (b *batchAPI) ZLexCount(key string, min, max Arg) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Arg(min)
+	b.args.Arg(max)
+	return b.doInteger("ZLEXCOUNT")
 }
 
 // ZPopMax removes and returns up to count members with the highest scores in the sorted set stored at key.
-func (c *Client) ZPopMax(key string, count int64) *ReplyZRange {
-	c.args.Key(key)
+func (b *batchAPI) ZPopMax(key string, count int64) *ReplyZRange {
+	b.args.Key(key)
 	if count > 0 {
-		c.args.Int(count)
+		b.args.Int(count)
 	}
-	return c.doZRange("ZPOPMAX")
+	return b.doZRange("ZPOPMAX")
 }
 
 // ZPopMin removes and returns up to count members with the lowest scores in the sorted set stored at key.
-func (c *Client) ZPopMin(key string, count int64) *ReplyZRange {
-	c.args.Key(key)
+func (b *batchAPI) ZPopMin(key string, count int64) *ReplyZRange {
+	b.args.Key(key)
 	if count > 0 {
-		c.args.Int(count)
+		b.args.Int(count)
 	}
-	return c.doZRange("ZPOPMIN")
+	return b.doZRange("ZPOPMIN")
 }
 
 // func CheckLex(lex string) bool {
@@ -161,31 +161,31 @@ func (c *Client) ZPopMin(key string, count int64) *ReplyZRange {
 // }
 
 // ZRank gets the rank of a member of a sorted set ordered from low to high
-func (c *Client) ZRank(key, member string) *ReplyInteger {
-	c.args.Key(key)
-	c.args.String(member)
-	return c.doInteger("ZRANK")
+func (b *batchAPI) ZRank(key, member string) *ReplyInteger {
+	b.args.Key(key)
+	b.args.String(member)
+	return b.doInteger("ZRANK")
 }
 
 // ZRevRank gets the rank of a member of a sorted set ordered from high to low
-func (c *Client) ZRevRank(key, member string) *ReplyInteger {
-	c.args.Key(key)
-	c.args.String(member)
-	return c.doInteger("ZREVRANK")
+func (b *batchAPI) ZRevRank(key, member string) *ReplyInteger {
+	b.args.Key(key)
+	b.args.String(member)
+	return b.doInteger("ZREVRANK")
 }
 
 // ZRem removes member(s) from a sorted set
-func (c *Client) ZRem(key string, members ...string) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Strings(members...)
-	return c.doInteger("ZREM")
+func (b *batchAPI) ZRem(key string, members ...string) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Strings(members...)
+	return b.doInteger("ZREM")
 }
 
 // ZScore returns the score of a member
-func (c *Client) ZScore(key, member string) *ReplyFloat {
-	c.args.Key(key)
-	c.args.String(member)
-	return c.doFloat("ZSCORE")
+func (b *batchAPI) ZScore(key, member string) *ReplyFloat {
+	b.args.Key(key)
+	b.args.String(member)
+	return b.doFloat("ZSCORE")
 }
 
 // Aggregate is an aggregate method
@@ -241,151 +241,151 @@ func (z *ZStore) args(args *ArgBuilder) {
 }
 
 // ZInterStore computes the intersection of numkeys sorted sets given by the specified keys, and stores the result in destination.
-func (c *Client) ZInterStore(args ZStore) *ReplyInteger {
-	args.args(&c.args)
-	return c.doInteger("ZINTERSTORE")
+func (b *batchAPI) ZInterStore(args ZStore) *ReplyInteger {
+	args.args(&b.args)
+	return b.doInteger("ZINTERSTORE")
 }
 
 // ZUnionStore computes the union of numkeys sorted sets given by the specified keys, and stores the result in destination.
-func (c *Client) ZUnionStore(args ZStore) *ReplyInteger {
-	args.args(&c.args)
-	return c.doInteger("ZUNIONSTORE")
+func (b *batchAPI) ZUnionStore(args ZStore) *ReplyInteger {
+	args.args(&b.args)
+	return b.doInteger("ZUNIONSTORE")
 }
 
 // ZRange returns the specified range of elements in the sorted set stored at key.
-func (c *Client) ZRange(key string, start, stop int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(stop)
-	return c.doBulkStringArray("ZRANGE")
+func (b *batchAPI) ZRange(key string, start, stop int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(stop)
+	return b.doBulkStringArray("ZRANGE")
 }
 
 // ZRevRange returns the specified range of elements in the sorted set stored at key.
-func (c *Client) ZRevRange(key string, start, stop int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(stop)
-	return c.doBulkStringArray("ZREVRANGE")
+func (b *batchAPI) ZRevRange(key string, start, stop int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(stop)
+	return b.doBulkStringArray("ZREVRANGE")
 }
 
 // ZRemRangeByRank removes all elements in the sorted set stored at key with rank between start and stop.
-func (c *Client) ZRemRangeByRank(key string, start, stop int64) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(stop)
-	return c.doInteger("ZREMRANGEBYRANK")
+func (b *batchAPI) ZRemRangeByRank(key string, start, stop int64) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(stop)
+	return b.doInteger("ZREMRANGEBYRANK")
 }
 
 // ZRangeWithScores returns the specified range of elements in the sorted set stored at key.
-func (c *Client) ZRangeWithScores(key string, start, stop int64) *ReplyZRange {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(stop)
-	c.args.String("WITHSCORES")
-	return c.doZRange("ZRANGE")
+func (b *batchAPI) ZRangeWithScores(key string, start, stop int64) *ReplyZRange {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(stop)
+	b.args.String("WITHSCORES")
+	return b.doZRange("ZRANGE")
 }
 
 // ZRevRangeWithScores returns the specified range of elements in the sorted set stored at key.
-func (c *Client) ZRevRangeWithScores(key string, start, stop int64) *ReplyZRange {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(stop)
-	c.args.String("WITHSCORES")
-	return c.doZRange("ZREVRANGE")
+func (b *batchAPI) ZRevRangeWithScores(key string, start, stop int64) *ReplyZRange {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(stop)
+	b.args.String("WITHSCORES")
+	return b.doZRange("ZREVRANGE")
 }
 
 // ZRangeByScore returns all the elements in the sorted set at key with a score between min and max
-func (c *Client) ZRangeByScore(key string, min, max Arg, offset, count int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Arg(min)
-	c.args.Arg(max)
+func (b *batchAPI) ZRangeByScore(key string, min, max Arg, offset, count int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Arg(min)
+	b.args.Arg(max)
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doBulkStringArray("ZRANGEBYSCORE")
+	return b.doBulkStringArray("ZRANGEBYSCORE")
 }
 
 // ZRevRangeByScore returns all the elements in the sorted set at key with a score between min and max
-func (c *Client) ZRevRangeByScore(key string, max, min Arg, offset, count int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Arg(max)
-	c.args.Arg(min)
+func (b *batchAPI) ZRevRangeByScore(key string, max, min Arg, offset, count int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Arg(max)
+	b.args.Arg(min)
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doBulkStringArray("ZREVRANGEBYSCORE")
+	return b.doBulkStringArray("ZREVRANGEBYSCORE")
 }
 
 // ZRemRangeByScore removes all elements in the sorted set stored at key with a score between min and max (inclusive).
-func (c *Client) ZRemRangeByScore(key string, min, max Arg) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Append(min, max)
-	return c.doInteger("ZREMRANGEBYSCORE")
+func (b *batchAPI) ZRemRangeByScore(key string, min, max Arg) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Append(min, max)
+	return b.doInteger("ZREMRANGEBYSCORE")
 }
 
 // ZRangeByScoreWithScores returns all the elements in the sorted set at key with a score between min and max
-func (c *Client) ZRangeByScoreWithScores(key string, min, max Arg, offset, count int64) *ReplyZRange {
-	c.args.Key(key)
-	c.args.Arg(min)
-	c.args.Arg(max)
-	c.args.String("WITHSCORES")
+func (b *batchAPI) ZRangeByScoreWithScores(key string, min, max Arg, offset, count int64) *ReplyZRange {
+	b.args.Key(key)
+	b.args.Arg(min)
+	b.args.Arg(max)
+	b.args.String("WITHSCORES")
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doZRange("ZRANGEBYSCORE")
+	return b.doZRange("ZRANGEBYSCORE")
 }
 
 // ZRevRangeByScoreWithScores returns all the elements in the sorted set at key with a score between min and max
-func (c *Client) ZRevRangeByScoreWithScores(key string, max, min Arg, offset, count int64) *ReplyZRange {
-	c.args.Key(key)
-	c.args.Arg(max)
-	c.args.Arg(min)
-	c.args.String("WITHSCORES")
+func (b *batchAPI) ZRevRangeByScoreWithScores(key string, max, min Arg, offset, count int64) *ReplyZRange {
+	b.args.Key(key)
+	b.args.Arg(max)
+	b.args.Arg(min)
+	b.args.String("WITHSCORES")
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doZRange("ZREVRANGEBYSCORE")
+	return b.doZRange("ZREVRANGEBYSCORE")
 }
 
 // ZRangeByLex when all the elements in a sorted set are inserted with the same score, in order to force lexicographical ordering, this command returnWhen all the elements in a sorted set are inserted with the same score, in order to force lexicographical ordering, this command returns all the elements in the sorted set at key with a value between min and max.s all the elements in the sorted set at key with a value between min and max.
-func (c *Client) ZRangeByLex(key string, min, max Arg, offset, count int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Arg(min)
-	c.args.Arg(max)
+func (b *batchAPI) ZRangeByLex(key string, min, max Arg, offset, count int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Arg(min)
+	b.args.Arg(max)
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doBulkStringArray("ZRANGEBYLEX")
+	return b.doBulkStringArray("ZRANGEBYLEX")
 }
 
 // ZRevRangeByLex when all the elements in a sorted set are inserted with the same score, in order to force lexicographical ordering, this command returnWhen all the elements in a sorted set are inserted with the same score, in order to force lexicographical ordering, this command returns all the elements in the sorted set at key with a value between min and max.s all the elements in the sorted set at key with a value between min and max.
-func (c *Client) ZRevRangeByLex(key string, max, min Arg, offset, count int64) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Arg(max)
-	c.args.Arg(min)
+func (b *batchAPI) ZRevRangeByLex(key string, max, min Arg, offset, count int64) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Arg(max)
+	b.args.Arg(min)
 	if count != 0 {
-		c.args.String("LIMIT")
-		c.args.Int(offset)
-		c.args.Int(count)
+		b.args.String("LIMIT")
+		b.args.Int(offset)
+		b.args.Int(count)
 	}
-	return c.doBulkStringArray("ZREVRANGEBYLEX")
+	return b.doBulkStringArray("ZREVRANGEBYLEX")
 }
 
 // ZRemRangeByLex removes all elements in the sorted set stored at key between the lexicographical range specified by min and max.
-func (c *Client) ZRemRangeByLex(key string, min, max Arg) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Append(min, max)
-	return c.doInteger("ZREMRANGEBYLEX")
+func (b *batchAPI) ZRemRangeByLex(key string, min, max Arg) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Append(min, max)
+	return b.doInteger("ZREMRANGEBYLEX")
 }
 
 // ZEntry is the entry of a sorted set
@@ -405,13 +405,13 @@ func Z(member string, score float64) ZEntry {
 // ReplyZRange is a map of members with scores
 type ReplyZRange struct {
 	members []ZEntry
-	clientReply
+	batchReply
 }
 
-func (c *Client) doZRange(cmd string) *ReplyZRange {
+func (b *batchAPI) doZRange(cmd string) *ReplyZRange {
 	reply := ReplyZRange{}
 	reply.Bind((*zEntriesWithScores)(&reply.members))
-	c.do(cmd, &reply.clientReply)
+	b.do(cmd, &reply.batchReply)
 	return &reply
 }
 
@@ -425,10 +425,10 @@ type ReplyZPop struct {
 	key    string
 	member string
 	score  float64
-	clientReply
+	batchReply
 }
 
-var _ batchReply = (*ReplyZPop)(nil)
+// var _ batchReply = (*ReplyZPop)(nil)
 
 // Reply returns the BZPOPMIN/BZPOPMAX reply
 func (reply *ReplyZPop) Reply() (key, member string, score float64, err error) {
@@ -482,14 +482,14 @@ func (z *zEntriesWithScores) UnmarshalRESP(v resp.Value) error {
 	return nil
 }
 
-func (c *Client) doZPop(cmd string) *ReplyZPop {
+func (b *batchAPI) doZPop(cmd string) *ReplyZPop {
 	reply := ReplyZPop{}
 	reply.Bind([]interface{}{
 		&reply.key,
 		&reply.member,
 		&reply.score,
 	})
-	c.do(cmd, &reply.clientReply)
+	b.do(cmd, &reply.batchReply)
 	return &reply
 
 }

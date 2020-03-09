@@ -3,15 +3,18 @@ package red_test
 import (
 	"reflect"
 	"testing"
+
+	"github.com/alxarch/red"
 )
 
 func TestAPI_Strings(t *testing.T) {
 	dial := dialer()
-	p, err := dial()
+	conn, err := dial()
 	if err != nil {
 		t.Fatalf("Dial failed %s", err)
 	}
-	defer p.Sync()
+	p := new(red.Batch)
+	defer conn.DoBatch(p)
 	defer p.FlushDB(false)
 
 	p.Set("foo", "bar", 0)
@@ -43,7 +46,7 @@ func TestAPI_Strings(t *testing.T) {
 		"baz", "foo",
 	)
 	p.MGet("foo", "bar", "baz").Bind(&values)
-	if err := p.Sync(); err != nil {
+	if err := conn.DoBatch(p); err != nil {
 		t.Errorf("Exec failed %s", err)
 	}
 	if foo != "barbaz" {
@@ -77,5 +80,5 @@ func TestAPI_Strings(t *testing.T) {
 		t.Errorf("Invalid MGET %v", values)
 	}
 
-	p.Sync()
+	conn.DoBatch(p)
 }

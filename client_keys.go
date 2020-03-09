@@ -7,46 +7,46 @@ import (
 // Keys
 
 // Del adds a DEL command to the pipeline
-func (c *Client) Del(key string, keys ...string) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Keys(keys...)
-	return c.doInteger("DEL")
+func (b *batchAPI) Del(key string, keys ...string) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Keys(keys...)
+	return b.doInteger("DEL")
 }
 
 // Dump adds a DUMP command
-func (c *Client) Dump(key string) *ReplyBulkString {
-	c.args.Key(key)
-	return c.doBulkString("DUMP")
+func (b *batchAPI) Dump(key string) *ReplyBulkString {
+	b.args.Key(key)
+	return b.doBulkString("DUMP")
 }
 
 // Exists is redis EXISTS command
-func (c *Client) Exists(keys ...string) *ReplyInteger {
-	c.args.Keys(keys...)
-	return c.doInteger("EXISTS")
+func (b *batchAPI) Exists(keys ...string) *ReplyInteger {
+	b.args.Keys(keys...)
+	return b.doInteger("EXISTS")
 }
 
 // Expire is redis EXPIRE command
-func (c *Client) Expire(key string, ttl time.Duration) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Arg(Seconds(ttl))
-	return c.doInteger("EXPIRE")
+func (b *batchAPI) Expire(key string, ttl time.Duration) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Arg(Seconds(ttl))
+	return b.doInteger("EXPIRE")
 }
 
 // ExpireAt is redis EXPIREAT command
-func (c *Client) ExpireAt(key string, tm time.Time) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Arg(UnixSeconds(tm))
-	return c.doInteger("EXPIREAT")
+func (b *batchAPI) ExpireAt(key string, tm time.Time) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Arg(UnixSeconds(tm))
+	return b.doInteger("EXPIREAT")
 }
 
 // Keys returns all keys matching a pattern
-func (c *Client) Keys(pattern string) *ReplyBulkStringArray {
+func (b *batchAPI) Keys(pattern string) *ReplyBulkStringArray {
 	if pattern == "" {
 		pattern = "*"
 	}
-	c.args.String("MATCH")
-	c.args.String(pattern)
-	return c.doBulkStringArray("KEYS")
+	b.args.String("MATCH")
+	b.args.String(pattern)
+	return b.doBulkStringArray("KEYS")
 }
 
 // Migrate moves data across servers
@@ -62,105 +62,105 @@ type Migrate struct {
 }
 
 // Migrate moves data across servers
-func (c *Client) Migrate(m Migrate) *ReplyOK {
-	c.args.String(m.Host)
-	c.args.Int(int64(m.Port))
-	c.args.String("")
-	c.args.Int(int64(m.DestinasionDB))
-	c.args.Arg(Milliseconds(m.Timeout))
-	c.args.Flag("COPY", m.Copy)
-	c.args.Flag("REPLACE", m.Replace)
-	c.args.Option("AUTH", m.Auth)
-	c.args.String("KEYS")
-	c.args.Keys(m.Keys...)
-	return c.doSimpleStringOK("MIGRATE", 0)
+func (b *batchAPI) Migrate(m Migrate) *ReplyOK {
+	b.args.String(m.Host)
+	b.args.Int(int64(m.Port))
+	b.args.String("")
+	b.args.Int(int64(m.DestinasionDB))
+	b.args.Arg(Milliseconds(m.Timeout))
+	b.args.Flag("COPY", m.Copy)
+	b.args.Flag("REPLACE", m.Replace)
+	b.args.Option("AUTH", m.Auth)
+	b.args.String("KEYS")
+	b.args.Keys(m.Keys...)
+	return b.doSimpleStringOK("MIGRATE", 0)
 }
 
 // Move moves a key to a different DB index
-func (c *Client) Move(key string, db int) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Int(int64(db))
-	return c.doInteger("MOVE")
+func (b *batchAPI) Move(key string, db int) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Int(int64(db))
+	return b.doInteger("MOVE")
 }
 
 // ObjectRefCount is the redis' OBJECT REFCOUNT command
-func (c *Client) ObjectRefCount(key string) *ReplyInteger {
-	c.args.String("REFCOUNT")
-	c.args.Key(key)
-	return c.doInteger("OBJECT")
+func (b *batchAPI) ObjectRefCount(key string) *ReplyInteger {
+	b.args.String("REFCOUNT")
+	b.args.Key(key)
+	return b.doInteger("OBJECT")
 }
 
 // ObjectEncoding is the redis' OBJECT ENCODING command
-func (c *Client) ObjectEncoding(key string) *ReplyBulkString {
-	c.args.String("ENCODING")
-	c.args.Key(key)
-	return c.doBulkString("OBJECT")
+func (b *batchAPI) ObjectEncoding(key string) *ReplyBulkString {
+	b.args.String("ENCODING")
+	b.args.Key(key)
+	return b.doBulkString("OBJECT")
 }
 
 // ObjectIdleTime is the redis' OBJECT IDLETIME command
-func (c *Client) ObjectIdleTime(key string) *ReplyInteger {
-	c.args.String("IDLETIME")
-	c.args.Key(key)
-	return c.doInteger("OBJECT")
+func (b *batchAPI) ObjectIdleTime(key string) *ReplyInteger {
+	b.args.String("IDLETIME")
+	b.args.Key(key)
+	return b.doInteger("OBJECT")
 }
 
 // ObjectFreq is the redis' OBJECT FREQ command
-func (c *Client) ObjectFreq(key string) *ReplyInteger {
-	c.args.String("FREQ")
-	c.args.Key(key)
-	return c.doInteger("OBJECT")
+func (b *batchAPI) ObjectFreq(key string) *ReplyInteger {
+	b.args.String("FREQ")
+	b.args.Key(key)
+	return b.doInteger("OBJECT")
 }
 
 // ObjectHelp is the redis' OBJECT HELP command
-func (c *Client) ObjectHelp(key string) *ReplyBulkString {
-	c.args.String("HELP")
-	c.args.Key(key)
-	return c.doBulkString("OBJECT")
+func (b *batchAPI) ObjectHelp(key string) *ReplyBulkString {
+	b.args.String("HELP")
+	b.args.Key(key)
+	return b.doBulkString("OBJECT")
 }
 
 // Persist removes any TTL from a key
-func (c *Client) Persist(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("PERSIST")
+func (b *batchAPI) Persist(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("PERSIST")
 }
 
 // PExpire adds a TTL to a key in milliseconds
-func (c *Client) PExpire(key string, ttl time.Duration) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Arg(Milliseconds(ttl))
-	return c.doInteger("PEXPIRE")
+func (b *batchAPI) PExpire(key string, ttl time.Duration) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Arg(Milliseconds(ttl))
+	return b.doInteger("PEXPIRE")
 }
 
 // PExpireAt is redis PEXPIREAT command
-func (c *Client) PExpireAt(key string, tm time.Time) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Arg(UnixSeconds(tm))
-	return c.doInteger("PEXPIREAT")
+func (b *batchAPI) PExpireAt(key string, tm time.Time) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Arg(UnixSeconds(tm))
+	return b.doInteger("PEXPIREAT")
 }
 
 // PTTL gets the TTL of a key in milliseconds
-func (c *Client) PTTL(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("PTTL")
+func (b *batchAPI) PTTL(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("PTTL")
 }
 
 // RandomKey returns a random key
-func (c *Client) RandomKey() *ReplyBulkString {
-	return c.doBulkString("RANDOMKEY")
+func (b *batchAPI) RandomKey() *ReplyBulkString {
+	return b.doBulkString("RANDOMKEY")
 }
 
 // Rename renames a key
-func (c *Client) Rename(key, newkey string) *ReplyOK {
-	c.args.Key(key)
-	c.args.Key(newkey)
-	return c.doSimpleStringOK("RENAME", 0)
+func (b *batchAPI) Rename(key, newkey string) *ReplyOK {
+	b.args.Key(key)
+	b.args.Key(newkey)
+	return b.doSimpleStringOK("RENAME", 0)
 }
 
 // RenameNX renames a key if the new name does not exist
-func (c *Client) RenameNX(key, newkey string) *ReplyOK {
-	c.args.Key(key)
-	c.args.Key(newkey)
-	return c.doSimpleStringOK("RENAMENX", NX)
+func (b *batchAPI) RenameNX(key, newkey string) *ReplyOK {
+	b.args.Key(key)
+	b.args.Key(newkey)
+	return b.doSimpleStringOK("RENAMENX", NX)
 }
 
 // Restore restores a key value from a string
@@ -175,24 +175,23 @@ type Restore struct {
 }
 
 // Restore restores a key value from a string
-func (c *Client) Restore(r Restore) *ReplyOK {
-	args := &c.args
-	args.Key(r.Key)
-	args.Arg(Milliseconds(r.TTL))
-	args.String(r.Value)
+func (b *batchAPI) Restore(r Restore) *ReplyOK {
+	b.args.Key(r.Key)
+	b.args.Arg(Milliseconds(r.TTL))
+	b.args.String(r.Value)
 	if r.Replace {
-		args.String("REPLACE")
+		b.args.String("REPLACE")
 	}
 	if r.AbsoluteTTL {
-		args.String("ABSTTL")
+		b.args.String("ABSTTL")
 	}
 	if r.IdleTime > time.Second {
-		args.Append(String("IDLETIIME"), Seconds(r.IdleTime))
+		b.args.Append(String("IDLETIIME"), Seconds(r.IdleTime))
 	}
 	if r.Frequency > 0 {
-		args.Append(String("FREQ"), Int64(r.Frequency))
+		b.args.Append(String("FREQ"), Int64(r.Frequency))
 	}
-	return c.doSimpleStringOK("RESTORE", 0)
+	return b.doSimpleStringOK("RESTORE", 0)
 }
 
 // Sort sorts keys
@@ -228,88 +227,86 @@ func (o SortOrder) String() string {
 }
 
 // Sort sorts a key's values
-func (c *Client) Sort(key string, sort Sort) *ReplyBulkStringArray {
-	args := &c.args
-	args.Key(key)
-	args.Key(key)
+func (b *batchAPI) Sort(key string, sort Sort) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Key(key)
 	if sort.By != "" {
-		args.String("BY")
-		args.String(sort.By)
+		b.args.String("BY")
+		b.args.String(sort.By)
 	}
 	if sort.Count > 0 {
-		args.String("LIMIT")
-		args.Int(sort.Offset)
-		args.Int(sort.Count)
+		b.args.String("LIMIT")
+		b.args.Int(sort.Offset)
+		b.args.Int(sort.Count)
 	}
 	for i := range sort.Get {
-		args.String("GET")
-		args.String(sort.Get[i])
+		b.args.String("GET")
+		b.args.String(sort.Get[i])
 	}
 	if ord := sort.Order.String(); ord != "" {
-		args.String(ord)
+		b.args.String(ord)
 	}
 	if sort.Alphanumeric {
-		args.String("ALPHA")
+		b.args.String("ALPHA")
 	}
-	return c.doBulkStringArray("SORT")
+	return b.doBulkStringArray("SORT")
 }
 
 // SortStore sorts a `key`'s value storing the result in `dest`
-func (c *Client) SortStore(dest, key string, sort Sort) *ReplyInteger {
-	args := &c.args
-	args.Key(key)
-	args.Key(key)
+func (b *batchAPI) SortStore(dest, key string, sort Sort) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Key(key)
 	if sort.By != "" {
-		args.String("BY")
-		args.String(sort.By)
+		b.args.String("BY")
+		b.args.String(sort.By)
 	}
 	if sort.Count > 0 {
-		args.String("LIMIT")
-		args.Int(sort.Offset)
-		args.Int(sort.Count)
+		b.args.String("LIMIT")
+		b.args.Int(sort.Offset)
+		b.args.Int(sort.Count)
 	}
 	for i := range sort.Get {
-		args.String("GET")
-		args.String(sort.Get[i])
+		b.args.String("GET")
+		b.args.String(sort.Get[i])
 	}
 	if ord := sort.Order.String(); ord != "" {
-		args.String(ord)
+		b.args.String(ord)
 	}
 	if sort.Alphanumeric {
-		args.String("ALPHA")
+		b.args.String("ALPHA")
 	}
-	args.String("STORE")
-	args.Key(dest)
-	return c.doInteger("SORT")
+	b.args.String("STORE")
+	b.args.Key(dest)
+	return b.doInteger("SORT")
 }
 
 // Touch alters the last access time of a key(s).
-func (c *Client) Touch(keys ...string) *ReplyInteger {
-	c.args.Keys(keys...)
-	return c.doInteger("TOUCH")
+func (b *batchAPI) Touch(keys ...string) *ReplyInteger {
+	b.args.Keys(keys...)
+	return b.doInteger("TOUCH")
 }
 
 // TTL returns the remaining lifetime of a key in seconds
-func (c *Client) TTL(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("TTL")
+func (b *batchAPI) TTL(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("TTL")
 }
 
 // Type returns the type of the value of a key
-func (c *Client) Type(key string) *ReplySimpleString {
-	c.args.Key(key)
-	return c.doSimpleString("TYPE")
+func (b *batchAPI) Type(key string) *ReplySimpleString {
+	b.args.Key(key)
+	return b.doSimpleString("TYPE")
 }
 
 // Unlink drops keys
-func (c *Client) Unlink(keys ...string) *ReplyInteger {
-	c.args.Keys(keys...)
-	return c.doInteger("UNLINK")
+func (b *batchAPI) Unlink(keys ...string) *ReplyInteger {
+	b.args.Keys(keys...)
+	return b.doInteger("UNLINK")
 }
 
 // Wait blocks until a number of replicas have stored the data or timeout occured
-func (c *Client) Wait(numReplicas int, timeout time.Duration) *ReplyInteger {
-	c.args.Int(int64(numReplicas))
-	c.args.Arg(Milliseconds(timeout))
-	return c.doInteger("WAIT")
+func (b *batchAPI) Wait(numReplicas int, timeout time.Duration) *ReplyInteger {
+	b.args.Int(int64(numReplicas))
+	b.args.Arg(Milliseconds(timeout))
+	return b.doInteger("WAIT")
 }

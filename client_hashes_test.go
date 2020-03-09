@@ -4,16 +4,18 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/alxarch/red"
 	"github.com/alxarch/red/resp"
 )
 
 func TestAPI_Hashes(t *testing.T) {
 	dial := dialer()
-	p, err := dial()
+	conn, err := dial()
 	if err != nil {
 		t.Fatalf("Dial failed %s", err)
 	}
-	defer p.Sync()
+	p := new(red.Batch)
+	defer conn.DoBatch(p)
 	defer p.FlushDB(false)
 
 	p.HSet("foo", "bar", "baz")
@@ -134,5 +136,5 @@ func TestAPI_Hashes(t *testing.T) {
 		}
 	}()
 
-	p.Sync()
+	conn.DoBatch(p)
 }

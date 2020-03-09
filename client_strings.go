@@ -6,161 +6,161 @@ import (
 )
 
 // Append appends a string to a value of a key
-func (c *Client) Append(key, value string) *ReplyBulkString {
-	c.args.Key(key)
-	c.args.String(value)
-	return c.doBulkString("APPEND")
+func (b *batchAPI) Append(key, value string) *ReplyBulkString {
+	b.args.Key(key)
+	b.args.String(value)
+	return b.doBulkString("APPEND")
 }
 
 // Decr decrements key by 1
-func (c *Client) Decr(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("DECR")
+func (b *batchAPI) Decr(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("DECR")
 }
 
 // DecrBy decrements key by n
-func (c *Client) DecrBy(key string, d int64) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Int(int64(d))
-	return c.doInteger("DECRBY")
+func (b *batchAPI) DecrBy(key string, d int64) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Int(int64(d))
+	return b.doInteger("DECRBY")
 }
 
 // Get returns the string value of a key
-func (c *Client) Get(key string) *ReplyBulkString {
-	c.args.Key(key)
-	return c.doBulkString("GET")
+func (b *batchAPI) Get(key string) *ReplyBulkString {
+	b.args.Key(key)
+	return b.doBulkString("GET")
 }
 
 // GetRange gets a part of a string
-func (c *Client) GetRange(key string, start, end int64) *ReplyBulkString {
-	c.args.Key(key)
-	c.args.Int(start)
-	c.args.Int(end)
-	return c.doBulkString("GETRANGE")
+func (b *batchAPI) GetRange(key string, start, end int64) *ReplyBulkString {
+	b.args.Key(key)
+	b.args.Int(start)
+	b.args.Int(end)
+	return b.doBulkString("GETRANGE")
 }
 
 // GetSet atomicaly replaces a value returning the old value
-func (c *Client) GetSet(key, value string) *ReplyBulkString {
-	c.args.Key(key)
-	c.args.String(value)
-	return c.doBulkString("GETSET")
+func (b *batchAPI) GetSet(key, value string) *ReplyBulkString {
+	b.args.Key(key)
+	b.args.String(value)
+	return b.doBulkString("GETSET")
 }
 
 // Incr increments key by 1
-func (c *Client) Incr(key string) *ReplyInteger {
-	c.args.Key(key)
-	return c.doInteger("INCR")
+func (b *batchAPI) Incr(key string) *ReplyInteger {
+	b.args.Key(key)
+	return b.doInteger("INCR")
 
 }
 
 // IncrBy incremments the value at a key by an integer amount
-func (c *Client) IncrBy(key string, n int64) *ReplyInteger {
-	c.args.Key(key)
-	c.args.Int(n)
-	return c.doInteger("INCRBY")
+func (b *batchAPI) IncrBy(key string, n int64) *ReplyInteger {
+	b.args.Key(key)
+	b.args.Int(n)
+	return b.doInteger("INCRBY")
 
 }
 
 // IncrByFloat incremments the value at a key by a float amount
-func (c *Client) IncrByFloat(key string, incr float64) *ReplyFloat {
-	c.args.Key(key)
-	c.args.Float(incr)
-	return c.doFloat("INCRBYFLOAT")
+func (b *batchAPI) IncrByFloat(key string, incr float64) *ReplyFloat {
+	b.args.Key(key)
+	b.args.Float(incr)
+	return b.doFloat("INCRBYFLOAT")
 }
 
 // MGet gets multiple key values
-func (c *Client) MGet(key string, keys ...string) *ReplyBulkStringArray {
-	c.args.Key(key)
-	c.args.Keys(keys...)
-	return c.doBulkStringArray("MGET")
+func (b *batchAPI) MGet(key string, keys ...string) *ReplyBulkStringArray {
+	b.args.Key(key)
+	b.args.Keys(keys...)
+	return b.doBulkStringArray("MGET")
 }
 
 // MSet sets multiple keys
-func (c *Client) MSet(values ...string) *ReplyOK {
+func (b *batchAPI) MSet(values ...string) *ReplyOK {
 	var k, v string
 	for len(values) >= 2 {
 		k, v, values = values[0], values[1], values[2:]
-		c.args.Key(k)
-		c.args.String(v)
+		b.args.Key(k)
+		b.args.String(v)
 	}
-	return c.doSimpleStringOK("MSET", 0)
+	return b.doSimpleStringOK("MSET", 0)
 }
 
 // MSetArg sets multiple keys
-func (c *Client) MSetArg(values map[string]Arg) *ReplyOK {
+func (b *batchAPI) MSetArg(values map[string]Arg) *ReplyOK {
 	for k, v := range values {
-		c.args.Key(k)
-		c.args.Arg(v)
+		b.args.Key(k)
+		b.args.Arg(v)
 	}
-	return c.doSimpleStringOK("MSET", 0)
+	return b.doSimpleStringOK("MSET", 0)
 }
 
 // MSetNX sets multiple keys if they do not exist
-func (c *Client) MSetNX(values ...string) *ReplyBool {
+func (b *batchAPI) MSetNX(values ...string) *ReplyBool {
 	var k, v string
 	for len(values) >= 2 {
 		k, v, values = values[0], values[1], values[2:]
-		c.args.Key(k)
-		c.args.String(v)
+		b.args.Key(k)
+		b.args.String(v)
 	}
-	return c.doBool("MSETNX")
+	return b.doBool("MSETNX")
 }
 
-func (c *Client) doSet(mode Mode, k, v string, ttl time.Duration) *ReplyOK {
-	c.args.Key(k)
-	c.args.String(v)
+func (b *batchAPI) doSet(mode Mode, k, v string, ttl time.Duration) *ReplyOK {
+	b.args.Key(k)
+	b.args.String(v)
 	const KeepTTL time.Duration = math.MinInt64
 	if ttl > 0 {
 		if ex := ttl.Truncate(time.Second); ex == ttl {
-			c.args.String("EX")
-			c.args.Arg(Seconds(ttl))
+			b.args.String("EX")
+			b.args.Arg(Seconds(ttl))
 		} else {
-			c.args.String("PX")
-			c.args.Arg(Milliseconds(ttl))
+			b.args.String("PX")
+			b.args.Arg(Milliseconds(ttl))
 		}
 	}
 	switch mode {
 	case NX:
-		c.args.String("NX")
+		b.args.String("NX")
 	case XX:
-		c.args.String("XX")
+		b.args.String("XX")
 	}
 	if ttl == KeepTTL {
-		c.args.String("KEEPTTL")
+		b.args.String("KEEPTTL")
 	}
-	return c.doSimpleStringOK("SET", mode)
+	return b.doSimpleStringOK("SET", mode)
 }
 
 // SetXX resets a key value if it exists
-func (c *Client) SetXX(key, value string, ttl time.Duration) *ReplyOK {
-	return c.doSet(XX, key, value, ttl)
+func (b *batchAPI) SetXX(key, value string, ttl time.Duration) *ReplyOK {
+	return b.doSet(XX, key, value, ttl)
 }
 
 // Set sets a key to value
-func (c *Client) Set(key, value string, ttl time.Duration) *ReplyOK {
-	return c.doSet(0, key, value, ttl)
+func (b *batchAPI) Set(key, value string, ttl time.Duration) *ReplyOK {
+	return b.doSet(0, key, value, ttl)
 }
 
 // SetNX sets a new key value
-func (c *Client) SetNX(key, value string, ttl time.Duration) *ReplyOK {
-	return c.doSet(NX, key, value, ttl)
+func (b *batchAPI) SetNX(key, value string, ttl time.Duration) *ReplyOK {
+	return b.doSet(NX, key, value, ttl)
 }
 
 // SetEX sets a key with a ttl
-func (c *Client) SetEX(key, value string, ttl time.Duration) *ReplyOK {
-	return c.doSet(0, key, value, ttl)
+func (b *batchAPI) SetEX(key, value string, ttl time.Duration) *ReplyOK {
+	return b.doSet(0, key, value, ttl)
 }
 
 // SetRange sets a part of a string
-func (c *Client) SetRange(key string, offset int64, value string) *ReplyBulkString {
-	c.args.Key(key)
-	c.args.Int(offset)
-	c.args.String(value)
-	return c.doBulkString("SETRANGE")
+func (b *batchAPI) SetRange(key string, offset int64, value string) *ReplyBulkString {
+	b.args.Key(key)
+	b.args.Int(offset)
+	b.args.String(value)
+	return b.doBulkString("SETRANGE")
 }
 
 // StrLen return the length of a string value
-func (c *Client) StrLen(key string) *ReplyBulkString {
-	c.args.Key(key)
-	return c.doBulkString("STRLEN")
+func (b *batchAPI) StrLen(key string) *ReplyBulkString {
+	b.args.Key(key)
+	return b.doBulkString("STRLEN")
 }
