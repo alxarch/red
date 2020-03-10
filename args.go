@@ -158,13 +158,12 @@ func Lex(lex string, inclusive bool) Arg {
 }
 
 // Score creates an score range argument (ie '42.0', '(42.0')
-func Score(f float64, inclusive bool) Arg {
+func Score(score float64, inclusive bool) Arg {
 	if inclusive {
-		return Arg{typ: argScore, num: math.Float64bits(f)}
+		return Arg{typ: argScore, num: math.Float64bits(score)}
 
 	}
-	return Arg{typ: argScore, num: math.Float64bits(f), str: "("}
-
+	return Arg{typ: argScore, num: math.Float64bits(score), str: "("}
 }
 
 // Bool creates a boolean argument.
@@ -317,6 +316,16 @@ func (a *ArgBuilder) Arg(arg Arg) {
 	a.args = append(a.args, arg)
 }
 
+// Milliseconds adds a duration in ms
+func (a *ArgBuilder) Milliseconds(d time.Duration) {
+	a.args = append(a.args, Milliseconds(d))
+}
+
+// Seconds adds a duration in sec
+func (a *ArgBuilder) Seconds(d time.Duration) {
+	a.args = append(a.args, Seconds(d))
+}
+
 // Append adds multiple arguments
 func (a *ArgBuilder) Append(args ...Arg) {
 	a.args = append(a.args, args...)
@@ -367,66 +376,53 @@ func QuickArgs(key string, args ...string) []Arg {
 	return out
 }
 
-// Writer writes commands to the underlying RESP writer
-type Writer struct {
-	dest    *resp.Writer
-	scratch []byte // Reusable buffer used for numeric conversions on args
-}
-
 // WriteCommand writes a redis command
-func (w *Writer) WriteCommand(keyPrefix, name string, args ...Arg) error {
-	if err := w.dest.WriteArray(int64(len(args) + 1)); err != nil {
+func WriteCommand(w *resp.Writer, keyPrefix, name string, args ...Arg) error {
+	if err := w.WriteArray(int64(len(args) + 1)); err != nil {
 		return err
 	}
-	if err := w.dest.WriteBulkString(name); err != nil {
+	if err := w.WriteBulkString(name); err != nil {
 		return err
 	}
-	return w.WriteArgs(keyPrefix, args...)
-}
-
-// Flush flushes the underlying writer
-func (w *Writer) Flush() error {
-	return w.dest.Flush()
-}
-
-// Reset resets the underlying writer
-func (w *Writer) Reset(dest *resp.Writer) {
-	w.dest = dest
+	return WriteArgs(w, keyPrefix, args...)
 }
 
 // WriteArgs writes args as bulk strings to the underlying writer
-func (w *Writer) WriteArgs(keyPrefix string, args ...Arg) (err error) {
-	resp := w.dest
+func WriteArgs(w *resp.Writer, keyPrefix string, args ...Arg) (err error) {
 	for i := range args {
 		switch arg := &args[i]; arg.typ {
 		case argString:
-			err = resp.WriteBulkString(arg.str)
+			err = w.WriteBulkString(arg.str)
 		case argKey:
-			err = resp.WriteBulkStringPrefix(keyPrefix, arg.str)
+			err = w.WriteBulkStringPrefix(keyPrefix, arg.str)
 		case argInt:
-			w.scratch = strconv.AppendInt(w.scratch[:0], int64(arg.num), 10)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			err = w.WriteBulkStringInt(int64(arg.num))
 		case argUint:
-			w.scratch = strconv.AppendUint(w.scratch[:0], arg.num, 10)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			err = w.WriteBulkStringUint(arg.num)
 		case argFloat32:
-			w.scratch = strconv.AppendFloat(w.scratch[:0], math.Float64frombits(arg.num), 'f', -1, 32)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			err = w.WriteBulkStringFloat(math.Float64frombits(arg.num))
 		case argFloat64:
-			w.scratch = strconv.AppendFloat(w.scratch[:0], math.Float64frombits(arg.num), 'f', -1, 64)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			err = w.WriteBulkStringFloat(math.Float64frombits(arg.num))
 		case argLex:
-			w.scratch = append(w.scratch[:0], byte(arg.num))
-			w.scratch = append(w.scratch, arg.str...)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			switch byte(arg.num) {
+			case '[':
+				err = w.WriteBulkStringPrefix("[", arg.str)
+			case '(':
+				err = w.WriteBulkStringPrefix("(", arg.str)
+			default:
+				err = w.WriteBulkString(arg.str)
+			}
 		case argScore:
-			w.scratch = append(w.scratch[:0], arg.str...)
-			w.scratch = strconv.AppendFloat(w.scratch, math.Float64frombits(arg.num), 'f', -1, 64)
-			err = resp.WriteBulkStringBytes(w.scratch)
+			score := math.Float64frombits(arg.num)
+			if arg.str == "(" {
+				err = w.WriteBulkStringPrefix("(", strconv.FormatFloat(score, 'f', -1, 64))
+			} else {
+				err = w.WriteBulkStringFloat(score)
+			}
 		case argFalse:
-			err = resp.WriteBulkString("false")
+			err = w.WriteBulkString("false")
 		case argTrue:
-			err = resp.WriteBulkString("true")
+			err = w.WriteBulkString("true")
 		}
 		if err != nil {
 			return
