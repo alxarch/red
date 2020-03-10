@@ -14,6 +14,7 @@ const (
 	entryDiscard
 	entryUnwatch
 	entryWatch
+	entryCommand
 )
 
 type Entry struct {
@@ -51,15 +52,14 @@ func (s *State) Pop() (Entry, bool) {
 	}
 	if len(s.queue) > 0 {
 		entry, tail := s.queue[0], s.queue[1:]
-		s.dirty = len(tail) == 0
 		for i := len(tail) - 1; i >= 0; i-- {
 			s.stack = append(s.stack, tail[i])
 		}
 		s.queue = s.queue[:0]
+		s.dirty = len(tail) == 0
 		return entry, true
-	} else {
-		s.dirty = false
 	}
+	s.dirty = false
 	return Entry{}, false
 }
 
@@ -95,6 +95,8 @@ func (q *State) push(typ entryType) *Entry {
 		q.queued = 0
 	case entryUnwatch:
 		q.watch = 0
+	default:
+		typ = entryCommand
 	}
 
 	skip := q.skip()
@@ -107,20 +109,58 @@ func (q *State) push(typ entryType) *Entry {
 	return &q.queue[index]
 }
 
-func (q *State) Peek() Entry {
-	if last := len(q.stack) - 1; 0 <= last && last < len(q.stack) {
-		return q.stack[last]
+func (q *State) Peek() (entry Entry) {
+	for i := len(q.stack) - 1; 0 <= i && i < len(q.stack); i-- {
+		entry = q.stack[i]
+		if !entry.Skip() {
+			return
+		}
 	}
-	if len(q.queue) > 0 {
-		return q.queue[0]
+	for _, entry = range q.queue {
+		if !entry.Skip() {
+			return
+		}
 	}
 	return Entry{}
 }
 
+func (q *State) Last() Entry {
+	if last := len(q.queue) - 1; 0 <= last && last < len(q.queue) {
+		return q.queue[last]
+	}
+	if len(q.stack) > 0 {
+		return q.stack[0]
+	}
+	return Entry{}
+}
+
+func (q *State) PeekMulti() (n int) {
+	for {
+		next, ok := q.Pop()
+		if !ok {
+			return -1
+		}
+		if next.Skip() {
+			continue
+		}
+		q.stack = append(q.stack, next)
+		if !next.Multi() {
+			return -1
+		}
+		for i := len(q.stack) - 2; 0 <= i && i < len(q.stack); i-- {
+			if e := &q.stack[i]; e.Exec() || e.Discard() {
+				return
+			}
+			n++
+		}
+		return
+	}
+}
+
 func (q *State) Multi() (ok bool) {
 	ok = !q.multi
-	q.multi = true
 	_ = q.push(entryMulti)
+	q.multi = true
 	return
 }
 
@@ -150,9 +190,9 @@ func (q *State) Unwatch() (n int) {
 	return
 }
 func (q *State) ReplySkip() {
-	q.replySkip = true
-	_ = q.push(0)
-	q.replySkip = true
+	q.replySkip = !q.multi
+	_ = q.push(entryCommand)
+	q.replySkip = !q.multi
 }
 
 func (q *State) DB() int64 {
@@ -162,7 +202,7 @@ func (q *State) Select(db int64) {
 	if 0 <= db && db < 16 {
 		q.db = db
 	}
-	_ = q.push(0)
+	_ = q.push(entryCommand)
 }
 func (q *State) IsReplySkip() bool {
 	return q.replySkip
@@ -178,21 +218,24 @@ func (q *State) Queued() int {
 }
 func (q *State) ReplyON() {
 	q.replyOFF = false
-	_ = q.push(0)
+	_ = q.push(entryCommand)
 }
 func (q *State) ReplyOFF() {
 	q.replyOFF = true
-	_ = q.push(0)
+	_ = q.push(entryCommand)
 }
 
 func (q *State) Command() {
-	_ = q.push(0)
+	_ = q.push(entryCommand)
 }
 
 func (q *State) Block(timeout time.Duration) {
-	e := q.push(0)
-	e.block = true
-	e.timeout = timeout
+	e := q.push(entryCommand)
+	if !e.queued {
+		// Blocking commands inside MULTI/EXEC have zero timeout
+		e.block = true
+		e.timeout = timeout
+	}
 }
 func (q *State) Len() int {
 	return len(q.queue)
