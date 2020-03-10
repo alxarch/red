@@ -42,8 +42,11 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 		name, args = conn.rewriteCommand(name, args)
 	}
 
-	if name == "CLIENT" {
+	switch name {
+	case "CLIENT":
 		return fmt.Errorf("CLIENT commands not allowed")
+	case "SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE":
+		return fmt.Errorf("Subscribe commands not allowed")
 	}
 
 	if err := WriteCommand(&conn.w, conn.options.KeyPrefix, name, args...); err != nil {
