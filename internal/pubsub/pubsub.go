@@ -1,9 +1,7 @@
 package pubsub
 
 import (
-	"context"
 	"fmt"
-	"net"
 
 	"github.com/alxarch/red"
 	"github.com/alxarch/red/resp"
@@ -61,7 +59,7 @@ func (m *Message) UnmarshalRESP(value resp.Value) error {
 
 type Subscription struct {
 	Channels []string
-	Pattern bool
+	Pattern  bool
 }
 type unSubscription Subscription
 
@@ -79,94 +77,95 @@ func (s *Subscription) BuildCommand(args red.ArgBuilder) string {
 	}
 	return "SUBSCRIBE"
 }
-type Subscriber struct {
-	messages      <-chan *Message
-	subscribe     chan<- Subscription
-	unsubscribe   chan<- Subscription
-	subscriptions map[string]bool
-	cancel        context.CancelFunc
-}
 
-func SubscribeContext(ctx context.Context, conn net.Conn) *Subscriber {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	r := resp.NewStream(conn)
-	w := resp.NewWriter(conn)
-	messages := make(chan *Message)
-	subscribe := make(chan Subscription)
-	unsubscribe := make(chan Subscription)
-	go func() {
-		args := red.ArgBuilder{}
-		defer conn.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case sub := <-subscribe:
-				cmd := sub.BuildCommand(&args)
-				args.Reset()
-			case usub :=<-unsubscribe:
-				cmd := (*unSubscription)(&usub).BuildCommand(args)
-				args.Reset()
+// type Subscriber struct {
+// 	messages      <-chan *Message
+// 	subscribe     chan<- Subscription
+// 	unsubscribe   chan<- Subscription
+// 	subscriptions map[string]bool
+// 	cancel        context.CancelFunc
+// }
 
-			}
-		}
+// func SubscribeContext(ctx context.Context, conn net.Conn) *Subscriber {
+// 	if ctx == nil {
+// 		ctx = context.Background()
+// 	}
+// 	ctx, cancel := context.WithCancel(ctx)
+// 	r := resp.NewStream(conn)
+// 	w := resp.NewWriter(conn)
+// 	messages := make(chan *Message)
+// 	subscribe := make(chan Subscription)
+// 	unsubscribe := make(chan Subscription)
+// 	go func() {
+// 		args := red.ArgBuilder{}
+// 		defer conn.Close()
+// 		for {
+// 			select {
+// 			case <-ctx.Done():
+// 				return
+// 			case sub := <-subscribe:
+// 				cmd := sub.BuildCommand(&args)
+// 				args.Reset()
+// 			case usub :=<-unsubscribe:
+// 				cmd := (*unSubscription)(&usub).BuildCommand(args)
+// 				args.Reset()
 
-	}()
-	go func() {
-		for {
-			defer close(messages)
-			v, err := r.Next()
-			if err != nil {
-				return
-			}
-			msg := Message{}
-			if err := msg.UnmarshalRESP(v); err != nil {
-				return
-			}
-			select {
-			case messages <- &msg:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	go func() {
-		defer conn.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case sub := <- subscribe:
-				w.WriteArray(int64(1+len(sub.Channels)))
-				if sub.Pattern {
-					w.WriteBulkString("PSUBSCRIBE")
-				} else {
-					w.WriteBulkString("PUNSUBSCRIBE")
-				}
-				sub.
-			case msg := <-messages:
-				switch msg.Kind() {
-				case KindMessage:
-					select {
-					case out <- msg:
-					case <-ctx.Done():
-						return
-					}
-				case KindSubscribe:
-					subscriptions[msg.Channel()] = true
-				case KindUnsubscribe:
-					if n, ok := msg.NumChannels(); ok && n <= 0 {
-						return
-					}
-					subscriptions[msg.Channel()] = false
-				}
+// 			}
+// 		}
 
-			}
-		}
+// 	}()
+// 	go func() {
+// 		for {
+// 			defer close(messages)
+// 			v, err := r.Next()
+// 			if err != nil {
+// 				return
+// 			}
+// 			msg := Message{}
+// 			if err := msg.UnmarshalRESP(v); err != nil {
+// 				return
+// 			}
+// 			select {
+// 			case messages <- &msg:
+// 			case <-ctx.Done():
+// 				return
+// 			}
+// 		}
+// 	}()
+// 	go func() {
+// 		defer conn.Close()
+// 		for {
+// 			select {
+// 			case <-ctx.Done():
+// 				return
+// 			case sub := <- subscribe:
+// 				w.WriteArray(int64(1+len(sub.Channels)))
+// 				if sub.Pattern {
+// 					w.WriteBulkString("PSUBSCRIBE")
+// 				} else {
+// 					w.WriteBulkString("PUNSUBSCRIBE")
+// 				}
+// 				sub.
+// 			case msg := <-messages:
+// 				switch msg.Kind() {
+// 				case KindMessage:
+// 					select {
+// 					case out <- msg:
+// 					case <-ctx.Done():
+// 						return
+// 					}
+// 				case KindSubscribe:
+// 					subscriptions[msg.Channel()] = true
+// 				case KindUnsubscribe:
+// 					if n, ok := msg.NumChannels(); ok && n <= 0 {
+// 						return
+// 					}
+// 					subscriptions[msg.Channel()] = false
+// 				}
 
-	}()
-	return nil
-}
+// 			}
+// 		}
+
+// 	}()
+// 	return nil
+// }
