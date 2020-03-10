@@ -3,7 +3,6 @@ package resp
 
 import (
 	"fmt"
-	"strconv"
 )
 
 // CRLF is the line ending used in RESP
@@ -58,33 +57,27 @@ var (
 	errInvalidSize    = &ProtocolError{Message: "Invalid size"}
 )
 
-func AppendArray(buf []byte, n int64) []byte {
-	buf = append(buf, byte(TypeArray))
-	buf = strconv.AppendInt(buf, n, 10)
-	return append(buf, CRLF...)
-}
+// func AppendIntArray(buf []byte, values ...int64) []byte {
+// 	buf = AppendArray(buf, int64(len(values)))
+// 	for _, n := range values {
+// 		buf = Integer(n).AppendRESP(buf)
+// 	}
+// 	return buf
+// }
 
-func AppendIntArray(buf []byte, values ...int64) []byte {
-	buf = AppendArray(buf, int64(len(values)))
-	for _, n := range values {
-		buf = Integer(n).AppendRESP(buf)
-	}
-	return buf
-}
-
-func AppendCommand(buf []byte, cmd string, args ...string) []byte {
-	buf = AppendArray(buf, int64(len(args)+1))
-	bulk := BulkString{
-		String: cmd,
-		Valid:  true,
-	}
-	buf = bulk.AppendRESP(buf)
-	for _, arg := range args {
-		bulk.String = arg
-		buf = bulk.AppendRESP(buf)
-	}
-	return buf
-}
+// func AppendCommand(buf []byte, cmd string, args ...string) []byte {
+// 	buf = AppendArray(buf, int64(len(args)+1))
+// 	bulk := BulkString{
+// 		String: cmd,
+// 		Valid:  true,
+// 	}
+// 	buf = bulk.AppendRESP(buf)
+// 	for _, arg := range args {
+// 		bulk.String = arg
+// 		buf = bulk.AppendRESP(buf)
+// 	}
+// 	return buf
+// }
 
 // var (
 // 	typSimpleString = reflect.TypeOf((*SimpleString)(nil)).Elem()

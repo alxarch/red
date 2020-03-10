@@ -8,13 +8,15 @@ import (
 
 // Writer is a buffered writer for the RESP protocol.
 //
+// It provides helper methods to write RESP messages with minimum copying and allocations.
 // All writes are buffered up to a specified size.
 // An explicit call to `Flush()` is required to write all data to the underlying `io.Writer`.
 // The writer acts like `bufio.Writer` but avoids duplicate buffering during RESP protocol serialization.
 type Writer struct {
-	buffer []byte    // The buffer of pending writes
-	err    error     // Sticky error, once an error has occured during Flush the writer always returns this error
-	dest   io.Writer // The underlying writer
+	dest    io.Writer // The underlying writer
+	buffer  []byte    // The buffer of pending writes
+	err     error     // Sticky error, once an error has occured during Flush the writer always returns this error
+	scratch []byte    // Reusable buffer used for numeric conversions on args
 }
 
 // MaxBulkStringSize is the maximum bulk string size specifed in the RESP Protocol
@@ -55,8 +57,9 @@ func (w *Writer) Reset(dest io.Writer) {
 		w.buffer = make([]byte, defaultBufferSize)
 	}
 	*w = Writer{
-		dest:   dest,
-		buffer: w.buffer[:0],
+		dest:    dest,
+		buffer:  w.buffer[:0],
+		scratch: w.scratch[:0],
 	}
 }
 
@@ -80,10 +83,19 @@ func (w *Writer) Available() int {
 	return cap(w.buffer) - len(w.buffer)
 }
 
-func appendBulkStringHeader(buf []byte, size int) []byte {
-	buf = append(buf, byte(TypeBulkString))
-	buf = strconv.AppendInt(buf, int64(size), 10)
-	return append(buf, CRLF...)
+// WriteBulkString writes `s` as a RESP bulk string
+func (w *Writer) WriteBulkString(s string) error {
+	if len(s) > MaxBulkStringSize {
+		return errors.New("Invalid bulk string size")
+	}
+	if w.err != nil {
+		return w.err
+	}
+	if maxBulkStringHeaderSize+len(s)+len(CRLF) <= w.Available() {
+		w.buffer = appendBulkString(w.buffer, s)
+		return nil
+	}
+	return w.writeBulkStringBig("", s)
 }
 
 // WriteBulkStringPrefix writes `s` prefixed by `prefix` as a RESP bulk string
@@ -95,14 +107,11 @@ func (w *Writer) WriteBulkStringPrefix(prefix, s string) error {
 	if w.err != nil {
 		return w.err
 	}
-	b := w.buffer
-	if len(b)+maxBulkStringHeaderSize+size+len(CRLF) <= cap(b) {
-		b = append(b, byte(TypeBulkString))
-		b = strconv.AppendInt(b, int64(size), 10)
-		b = append(b, CRLF...)
-		b = append(b, prefix...)
-		b = append(b, s...)
-		w.buffer = append(b, CRLF...)
+	if maxBulkStringHeaderSize+size+len(CRLF) <= w.Available() {
+		w.buffer = appendBulkStringHeader(w.buffer, size)
+		w.buffer = append(w.buffer, prefix...)
+		w.buffer = append(w.buffer, s...)
+		w.buffer = append(w.buffer, CRLF...)
 		return nil
 	}
 	return w.writeBulkStringBig(prefix, s)
@@ -121,7 +130,7 @@ func (w *Writer) writeBulkStringBig(prefix, s string) error {
 		}
 		w.buffer, s = fillString(w.buffer, s)
 	}
-	if len(w.buffer)+len(CRLF) <= cap(w.buffer) {
+	if len(CRLF) <= w.Available() {
 		w.buffer = append(w.buffer, CRLF...)
 		return nil
 	}
@@ -132,34 +141,32 @@ func (w *Writer) writeBulkStringBig(prefix, s string) error {
 	return nil
 }
 
-// WriteBulkString writes `s` as a RESP bulk string
-func (w *Writer) WriteBulkString(s string) error {
-	if len(s) > MaxBulkStringSize {
-		return errors.New("Invalid bulk string size")
-	}
-	if w.err != nil {
-		return w.err
-	}
-	b := w.buffer
-	if len(b)+maxBulkStringHeaderSize+len(s)+len(CRLF) <= cap(b) {
-		b = append(b, byte(TypeBulkString))
-		b = strconv.AppendInt(b, int64(len(s)), 10)
-		b = append(b, CRLF...)
-		b = append(b, s...)
-		w.buffer = append(b, CRLF...)
-		return nil
-	}
-	return w.writeBulkStringBig("", s)
-}
-
 const nullBulkString = "$-1\r\n"
 
-// WriteBulkStringNull writes a RESP null bulk string
+// WriteBulkStringFloat writes `f` as a RESP bulk string
+func (w *Writer) WriteBulkStringFloat(f float64) error {
+	w.scratch = strconv.AppendFloat(w.scratch[:0], f, 'f', -1, 64)
+	return w.WriteBulkStringBytes(w.scratch[:])
+}
+
+// WriteBulkStringInt writes `n` as a RESP bulk string
+func (w *Writer) WriteBulkStringInt(n int64) error {
+	w.scratch = strconv.AppendInt(w.scratch[:0], n, 10)
+	return w.WriteBulkStringBytes(w.scratch[:])
+}
+
+// WriteBulkStringUint writes `n` as a RESP bulk string
+func (w *Writer) WriteBulkStringUint(n uint64) error {
+	w.scratch = strconv.AppendUint(w.scratch[:0], n, 10)
+	return w.WriteBulkStringBytes(w.scratch[:])
+}
+
+// WriteBulkStringNull writes a null RESP bulk string
 func (w *Writer) WriteBulkStringNull() error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.buffer)+len(nullBulkString) > cap(w.buffer) {
+	if len(nullBulkString) > w.Available() {
 		if err := w.Flush(); err != nil {
 			return err
 		}
@@ -180,11 +187,10 @@ func (w *Writer) WriteBulkStringBytes(s []byte) error {
 	if w.err != nil {
 		return w.err
 	}
-	b := w.buffer
-	if maxSize := len(b) + maxBulkStringHeaderSize + len(s) + len(CRLF); maxSize <= cap(b) {
-		b = appendBulkStringHeader(b, len(s))
-		b = append(b, s...)
-		w.buffer = append(b, CRLF...)
+	if maxBulkStringHeaderSize+len(s)+len(CRLF) <= w.Available() {
+		w.buffer = appendBulkStringHeader(w.buffer, len(s))
+		w.buffer = append(w.buffer, s...)
+		w.buffer = append(w.buffer, CRLF...)
 		return nil
 	}
 	// Size of write > available bytes (Slow path)
@@ -245,10 +251,10 @@ func (w *Writer) WriteSimpleString(s string) error {
 
 func (w *Writer) writeSafeString(typ byte, s string) error {
 	n := len("+") + len(s) + len(CRLF)
-	if n > cap(w.buffer) {
-		return io.ErrShortBuffer
-	}
-	if len(w.buffer)+n > cap(w.buffer) {
+	if w.Available() < n {
+		if cap(w.buffer) < n {
+			return io.ErrShortBuffer
+		}
 		if err := w.Flush(); err != nil {
 			return err
 		}
@@ -275,7 +281,7 @@ func (w *Writer) WriteArray(i int64) error {
 }
 
 func (w *Writer) writeInteger(typ Type, i int64) error {
-	if len(w.buffer)+maxIntEncodedSize > cap(w.buffer) {
+	if w.Available() < maxIntEncodedSize {
 		if err := w.Flush(); err != nil {
 			return err
 		}
@@ -308,4 +314,24 @@ func shiftL(b []byte, n int) []byte {
 		return b[:copy(b, b[n:])]
 	}
 	return b[:0]
+}
+
+func appendBulkStringHeader(buf []byte, size int) []byte {
+	buf = append(buf, byte(TypeBulkString))
+	buf = strconv.AppendInt(buf, int64(size), 10)
+	return append(buf, CRLF...)
+}
+
+func appendBulkString(buf []byte, s string) []byte {
+	buf = append(buf, byte(TypeBulkString))
+	buf = strconv.AppendInt(buf, int64(len(s)), 10)
+	buf = append(buf, CRLF...)
+	buf = append(buf, s...)
+	return append(buf, CRLF...)
+}
+
+func appendArray(buf []byte, n int64) []byte {
+	buf = append(buf, byte(TypeArray))
+	buf = strconv.AppendInt(buf, n, 10)
+	return append(buf, CRLF...)
 }
