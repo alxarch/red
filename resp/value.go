@@ -175,12 +175,6 @@ func (v Value) IsZero() bool {
 	return v == Value{}
 }
 
-// NullArray checks if a value is a null array
-func (v Value) NullArray() bool {
-	h := v.hint()
-	return h != nil && h.typ == TypeArray && h.null
-}
-
 // Null checks if a value is a null value.
 func (v Value) Null() bool {
 	if h := v.hint(); h != nil {
@@ -190,6 +184,12 @@ func (v Value) Null() bool {
 		}
 	}
 	return false
+}
+
+// NullArray checks if a value is a null array
+func (v Value) NullArray() bool {
+	h := v.hint()
+	return h != nil && h.typ == TypeArray && h.null
 }
 
 // NullBulkString checks if a value is a null bulk string
@@ -291,6 +291,25 @@ func (v Value) AppendRESP(buf []byte) []byte {
 	return buf
 }
 
+func (v Value) nonNullArray() (offset, size uint32, err error) {
+	if h := v.hint(); h != nil {
+		switch h.typ {
+		case TypeArray:
+			if h.null {
+				err = ErrNull
+			} else {
+				offset, size = h.offset, h.size
+			}
+			return
+		case TypeError:
+			err = Error(v.msg.str(h))
+			return
+		}
+	}
+	err = fmt.Errorf("Invalid RESP value %v", v.Any())
+	return
+}
+
 func (v Value) Each(fn func(v string) error) error {
 	offset, size, err := v.nonNullArray()
 	if err != nil {
@@ -310,24 +329,6 @@ func (v Value) Each(fn func(v string) error) error {
 		}
 	}
 	return nil
-}
-func (v Value) nonNullArray() (offset, size uint32, err error) {
-	if h := v.hint(); h != nil {
-		switch h.typ {
-		case TypeArray:
-			if h.null {
-				err = ErrNull
-			} else {
-				offset, size = h.offset, h.size
-			}
-			return
-		case TypeError:
-			err = Error(v.reply.str(h))
-			return
-		}
-	}
-	err = fmt.Errorf("Invalid RESP value %v", v.Any())
-	return
 }
 
 // EachKV calls fn for each key/value pair in an array
