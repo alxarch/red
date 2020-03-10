@@ -188,3 +188,46 @@ func (d *DecodeError) Unwrap() error {
 func (d *DecodeError) Error() string {
 	return fmt.Sprintf("RESP decode %s -> %v failed: %s", d.Source.Type(), d.Dest, d.Reason)
 }
+
+type Tee []Unmarshaler
+
+func (tee Tee) Concat(u ...Unmarshaler) Tee {
+	for _, u := range u {
+		if t, ok := u.(Tee); ok {
+			tee = tee.Concat(t...)
+			continue
+		}
+		tee = append(tee, u)
+	}
+	return tee
+}
+
+func (tee Tee) UnmarshalRESP(v Value) error {
+	for _, u := range tee {
+		if err := u.UnmarshalRESP(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type onceUnmarshaler struct {
+	dest interface{}
+}
+
+func Once(dest interface{}) Unmarshaler {
+	return &onceUnmarshaler{dest}
+}
+func (once *onceUnmarshaler) UnmarshalRESP(v Value) error {
+	if x := once.dest; x != nil {
+		once.dest = nil
+		return v.Decode(x)
+	}
+	return nil
+}
+
+type NopUnmarshaler struct{}
+
+func (NopUnmarshaler) UnmarshalRESP(_ Value) error {
+	return nil
+}
