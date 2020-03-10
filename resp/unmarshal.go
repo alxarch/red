@@ -25,9 +25,9 @@ func (a *BulkStringArray) UnmarshalRESP(v Value) error {
 	if h := v.hint(); h != nil {
 		switch h.typ {
 		case TypeArray:
-			return v.reply.decodeBulkStringSlice((*[]string)(a), h)
+			return v.msg.decodeBulkStringSlice((*[]string)(a), h)
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}
@@ -67,7 +67,7 @@ func (a BulkStringArray) AppendRESP(buf []byte) []byte {
 	if a == nil {
 		return append(buf, byte(TypeArray), '-', '1', '\r', '\n')
 	}
-	buf = AppendArray(buf, int64(len(a)))
+	buf = appendArray(buf, int64(len(a)))
 	bulk := BulkString{
 		Valid: true,
 	}
@@ -109,14 +109,14 @@ func (m *BulkStringMap) UnmarshalRESP(v Value) error {
 	if h := v.hint(); h != nil {
 		switch h.typ {
 		case TypeArray:
-			values, err := v.reply.decodeBulkStringMap(h)
+			values, err := v.msg.decodeBulkStringMap(h)
 			if err != nil {
 				return err
 			}
 			*m = values
 			return nil
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}
@@ -129,7 +129,7 @@ func (m BulkStringMap) AppendRESP(buf []byte) []byte {
 	if m == nil {
 		return BulkStringArray(nil).AppendRESP(buf)
 	}
-	buf = AppendArray(buf, int64(len(m)*2))
+	buf = appendArray(buf, int64(len(m)*2))
 	bulk := BulkString{Valid: true}
 	for k, v := range m {
 		bulk.String = k
@@ -151,11 +151,11 @@ func (raw *BulkStringBytes) UnmarshalRESP(v Value) error {
 			if h.null {
 				*raw = nil
 			} else {
-				*raw = append((*raw)[:0], v.reply.str(h)...)
+				*raw = append((*raw)[:0], v.msg.str(h)...)
 			}
 			return nil
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}

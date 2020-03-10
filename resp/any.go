@@ -55,10 +55,10 @@ func (s *SimpleString) UnmarshalRESP(v Value) error {
 	if h := v.hint(); h != nil {
 		switch h.typ {
 		case TypeSimpleString:
-			*s = SimpleString(v.reply.str(h))
+			*s = SimpleString(v.msg.str(h))
 			return nil
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}
@@ -116,7 +116,7 @@ func (e *Error) UnmarshalRESP(v Value) error {
 	if h := v.hint(); h != nil {
 		switch h.typ {
 		case TypeError:
-			*e = Error(v.reply.str(h))
+			*e = Error(v.msg.str(h))
 			return nil
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
@@ -178,13 +178,13 @@ func (s *BulkString) UnmarshalRESP(v Value) error {
 				*s = BulkString{}
 			} else {
 				*s = BulkString{
-					String: v.reply.str(h),
+					String: v.msg.str(h),
 					Valid:  true,
 				}
 			}
 			return nil
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}
@@ -389,7 +389,7 @@ func (i *Integer) UnmarshalRESP(v Value) error {
 			*i = Integer(h.int())
 			return nil
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		default:
 			return fmt.Errorf("Invalid RESP value %s", h.typ)
 		}
@@ -435,7 +435,7 @@ func (a Array) AppendRESP(buf []byte) []byte {
 	if a.Null() {
 		return ((BulkStringArray)(nil)).AppendRESP(buf)
 	}
-	buf = AppendArray(buf, int64(len(a)))
+	buf = appendArray(buf, int64(len(a)))
 	for _, v := range a {
 		buf = v.AppendRESP(buf)
 	}
@@ -622,11 +622,14 @@ func (a Array) BulkStringArray() (BulkStringArray, error) {
 	}
 	values := make([]string, len(a))
 	for i, v := range a {
-		if b, ok := v.(*BulkString); ok && b.Valid {
-			values[i] = b.String
-		} else {
+		b, ok := v.(*BulkString)
+		if !ok {
 			return nil, fmt.Errorf("Invalid element %d %v", i, v)
 		}
+		if !b.Valid {
+			return nil, fmt.Errorf("Invalid element %d %e", i, ErrNull)
+		}
+		values[i] = b.String
 	}
 	return values, nil
 }

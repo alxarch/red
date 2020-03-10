@@ -10,8 +10,16 @@ import (
 
 // Value is handle to a value in a RESP reply.
 type Value struct {
-	reply *Message
+	msg   *Message
 	index uint32
+}
+
+// Type returns the type of the value.
+func (v Value) Type() Type {
+	if h := v.hint(); h != nil {
+		return h.typ
+	}
+	return 0
 }
 
 // Decode decodes a RESP value to x
@@ -40,23 +48,23 @@ func (v Value) Decode(x interface{}) error {
 	case TypeBulkString:
 		s := BulkString{
 			Valid:  !h.null,
-			String: v.reply.str(h),
+			String: v.msg.str(h),
 		}
 		return s.Decode(x)
 	case TypeSimpleString:
-		s := v.reply.str(h)
+		s := v.msg.str(h)
 		return SimpleString(s).Decode(x)
 	case TypeInteger:
 		return Integer(h.int()).Decode(x)
 	case TypeError:
-		s := v.reply.str(h)
+		s := v.msg.str(h)
 		return Error(s).Decode(x)
 	case TypeArray:
 		switch dest := x.(type) {
 		case *[]string:
-			return v.reply.decodeBulkStringSlice(dest, h)
+			return v.msg.decodeBulkStringSlice(dest, h)
 		case *map[string]string:
-			m, err := v.reply.decodeBulkStringMap(h)
+			m, err := v.msg.decodeBulkStringMap(h)
 			if err != nil {
 				return err
 			}
@@ -110,7 +118,7 @@ func (v Value) Decode(x interface{}) error {
 			return nil
 		default:
 			// Revert to reflection-based decode
-			return v.reply.deflectArray(reflect.ValueOf(dest), h)
+			return v.msg.deflectArray(reflect.ValueOf(dest), h)
 		}
 	default:
 		return fmt.Errorf("Invalid node %s", h.typ)
@@ -118,8 +126,8 @@ func (v Value) Decode(x interface{}) error {
 }
 
 func (v Value) hint() *hint {
-	if v.reply != nil && v.index < uint32(len(v.reply.hints)) {
-		return &v.reply.hints[v.index]
+	if v.msg != nil && v.index < uint32(len(v.msg.hints)) {
+		return &v.msg.hints[v.index]
 	}
 	return nil
 }
@@ -127,17 +135,9 @@ func (v Value) hint() *hint {
 // Err returns an error if the value is a RESP error value.
 func (v Value) Err() error {
 	if h := v.hint(); h != nil && h.typ == TypeError {
-		return errors.New(v.reply.str(h))
+		return errors.New(v.msg.str(h))
 	}
 	return nil
-}
-
-// Type returns the type of the value.
-func (v Value) Type() Type {
-	if h := v.hint(); h != nil {
-		return h.typ
-	}
-	return 0
 }
 
 // Integer retuns the reply as int.
@@ -151,7 +151,7 @@ func (v Value) Integer() (int64, bool) {
 // SimpleString returns a RESP simple string value
 func (v Value) SimpleString() (string, bool) {
 	if h := v.hint(); h != nil && h.typ == TypeSimpleString {
-		return v.reply.str(h), true
+		return v.msg.str(h), true
 	}
 	return "", false
 }
@@ -163,7 +163,7 @@ func (v Value) BulkString() (BulkString, bool) {
 			return BulkString{}, true
 		}
 		return BulkString{
-			String: v.reply.str(h),
+			String: v.msg.str(h),
 			Valid:  true,
 		}, true
 	}
@@ -212,7 +212,7 @@ func (v Value) Iter() Iter {
 		return Iter{
 			offset: h.offset,
 			n:      h.size,
-			reply:  v.reply,
+			msg:    v.msg,
 		}
 	}
 	return Iter{}
@@ -227,13 +227,13 @@ func (v Value) Any() Any {
 				return &BulkString{}
 			}
 			return &BulkString{
-				String: v.reply.str(h),
+				String: v.msg.str(h),
 				Valid:  true,
 			}
 		case TypeSimpleString:
-			return SimpleString(v.reply.str(h))
+			return SimpleString(v.msg.str(h))
 		case TypeError:
-			return Error(v.reply.str(h))
+			return Error(v.msg.str(h))
 		case TypeInteger:
 			return Integer(h.int())
 		case TypeArray:
@@ -264,21 +264,21 @@ func (v Value) AppendRESP(buf []byte) []byte {
 				return s.AppendRESP(buf)
 			}
 			s := BulkString{
-				String: v.reply.str(h),
+				String: v.msg.str(h),
 				Valid:  true,
 			}
 			return s.AppendRESP(buf)
 		case TypeSimpleString:
-			return SimpleString(v.reply.str(h)).AppendRESP(buf)
+			return SimpleString(v.msg.str(h)).AppendRESP(buf)
 		case TypeError:
-			return Error(v.reply.str(h)).AppendRESP(buf)
+			return Error(v.msg.str(h)).AppendRESP(buf)
 		case TypeInteger:
 			return Integer(h.int()).AppendRESP(buf)
 		case TypeArray:
 			if h.null {
 				return Array(nil).AppendRESP(buf)
 			}
-			buf = AppendArray(buf, int64(h.size))
+			buf = appendArray(buf, int64(h.size))
 			if h.size > 0 {
 				end := h.offset + h.size
 				for v.index = h.offset; v.index < end; v.index++ {
@@ -368,7 +368,7 @@ type Iter struct {
 	offset uint32
 	n      uint32
 	index  uint32
-	reply  *Message
+	msg    *Message
 }
 
 // // Len returns the total size of an iterator
@@ -386,7 +386,7 @@ func (iter *Iter) More() bool {
 
 // Close ends the iterator and releases the reply buffer to avoid memory leaks
 func (iter *Iter) Close() {
-	iter.reply = nil
+	iter.msg = nil
 	iter.index = iter.n
 }
 
@@ -394,7 +394,7 @@ func (iter *Iter) Close() {
 func (iter *Iter) Value() Value {
 	return Value{
 		index: iter.offset + iter.index,
-		reply: iter.reply,
+		msg:   iter.msg,
 	}
 }
 
@@ -402,234 +402,3 @@ func (iter *Iter) Value() Value {
 func (iter *Iter) Next() {
 	iter.index++
 }
-
-// var errInvalidScanTarget = errors.New("Invalid scan target")
-// var errInvalidScanValue = errors.New("Invalid scan value")
-
-// // ScanError describes a failure of Scan
-// type ScanError struct {
-// 	Value  Value
-// 	Target reflect.Type
-// 	Reason error
-// }
-
-// // NewScanError creates a new ScanError
-// func NewScanError(v Value, target interface{}, reason error) *ScanError {
-// 	return &ScanError{
-// 		Value:  v,
-// 		Target: reflect.TypeOf(target),
-// 		Reason: reason,
-// 	}
-// }
-
-// func (e *ScanError) Error() string {
-// 	typ := reflect.TypeOf(e.Target)
-// 	if e.Reason != nil {
-// 		return fmt.Sprintf("Scan failed %s -> %s: %s", e.Value.Type(), typ, e.Reason)
-// 	}
-// 	return fmt.Sprintf("Scan failed %s -> %s", e.Value.Type(), typ)
-// }
-
-// func (i Integer) scan(x interface{}) error {
-// 	switch x := x.(type) {
-// 	case *int64:
-// 		*x = int64(i)
-// 		return nil
-// 	case *interface{}:
-// 		*x = int64(i)
-// 		return nil
-// 	case *float64:
-// 		*x = float64(i)
-// 		return nil
-// 	case *string:
-// 		*x = strconv.FormatInt(int64(i), 10)
-// 		return nil
-// 	default:
-// 		return errInvalidScanTarget
-// 	}
-// }
-
-// func (a Array) scan(x interface{}) error {
-// 	switch x := x.(type) {
-// 	case *[]interface{}:
-// 		if a == nil {
-// 			*x = nil
-// 			return nil
-// 		}
-// 		y := make([]interface{}, len(a))
-// 		if err := a.scan(&y); err != nil {
-// 			return err
-// 		}
-// 		*x = y
-// 		return nil
-// 	case *interface{}:
-// 		if a == nil {
-// 			*x = nil
-// 			return nil
-// 		}
-// 		y := make([]interface{}, len(a))
-// 		if err := a.scan(&y); err != nil {
-// 			return err
-// 		}
-// 		*x = y
-// 		return nil
-// 	case *[]string:
-// 		if a == nil {
-// 			*x = nil
-// 			return nil
-// 		}
-// 		values := make([]string, len(a))
-// 		for i := range values {
-// 			if err := Scan(a[i], &values[i]); err != nil {
-// 				return err
-// 			}
-// 		}
-// 		*x = values
-// 		return nil
-// 	case *map[string]string:
-// 		if a == nil {
-// 			*x = nil
-// 			return nil
-// 		}
-// 		if len(a)%2 != 0 {
-// 			return fmt.Errorf("Invalid array length %d", len(a))
-// 		}
-// 		m := make(map[string]string, len(a)/2)
-// 		var key, val string
-// 		for i, el := range a {
-// 			if i%2 == 0 {
-// 				if err := Scan(el, &key); err != nil {
-// 					return err
-// 				}
-// 			} else {
-// 				if err := Scan(el, &val); err != nil {
-// 					return err
-// 				}
-// 				m[key] = val
-// 			}
-// 		}
-// 		*x = m
-// 		return nil
-// 	case *map[string]float64:
-// 		if a == nil {
-// 			*x = nil
-// 			return nil
-// 		}
-// 		if len(a)%2 != 0 {
-// 			return fmt.Errorf("Invalid array length %d", len(a))
-// 		}
-// 		m := make(map[string]float64, len(a)/2)
-// 		var key string
-// 		var val float64
-// 		for i, el := range a {
-// 			if i%2 == 0 {
-// 				if err := Scan(el, &key); err != nil {
-// 					return err
-// 				}
-// 			} else {
-// 				if err := Scan(el, &val); err != nil {
-// 					return err
-// 				}
-// 				m[key] = val
-// 			}
-// 		}
-// 		*x = m
-// 		return nil
-// 	case []interface{}:
-// 		if len(x) == len(a) {
-// 			for i := range a {
-// 				if err := Scan(a[i], x[i]); err != nil {
-// 					return fmt.Errorf("Invalid scan element %d: %s", i, err)
-// 				}
-// 			}
-// 		}
-// 		return nil
-// 	default:
-// 		return a.scanV(reflect.ValueOf(x))
-// 	}
-// }
-
-// // Scan implements the Scanner inteface
-// func (b *BulkStringMap) Scan(v Value) error {
-// 	if arr, ok := v.(Array); ok {
-// 		m, err := arr.BulkStringMap()
-// 		if err != nil {
-// 			return err
-// 		}
-// 		*b = m
-// 	}
-// 	return errInvalidScanValue
-// }
-
-// func (s *BulkString) scan(x interface{}) error {
-// 	switch x := x.(type) {
-// 	case *string:
-// 		if s.Valid {
-// 			*x = s.String
-// 			return nil
-// 		}
-// 		return ErrNull
-// 	case *interface{}:
-// 		if s.Valid {
-// 			*x = s.String
-// 		} else {
-// 			*x = nil
-// 		}
-// 		return nil
-// 	case *int64:
-// 		if s.Valid {
-// 			n, err := strconv.ParseInt(s.String, 10, 64)
-// 			if err != nil {
-// 				return err
-// 			}
-// 			*x = n
-// 		}
-// 		return ErrNull
-// 	case *uint64:
-// 		if s.Valid {
-// 			u, err := strconv.ParseUint(s.String, 10, 64)
-// 			if err != nil {
-// 				return err
-// 			}
-// 			*x = u
-// 		}
-// 		return ErrNull
-// 	case *float64:
-// 		if s.Valid {
-// 			f, err := strconv.ParseFloat(s.String, 64)
-// 			if err != nil {
-// 				return err
-// 			}
-// 			*x = f
-// 		}
-// 		return ErrNull
-// 	default:
-// 		return errInvalidScanTarget
-// 	}
-// }
-
-// func (e Error) scan(x interface{}) error {
-// 	switch x := x.(type) {
-// 	case *error:
-// 		*x = e
-// 		return nil
-// 	case *interface{}:
-// 		*x = (error)(e)
-// 		return nil
-// 	default:
-// 		return e
-// 	}
-// }
-
-// func (s SimpleString) scan(x interface{}) error {
-// 	switch v := x.(type) {
-// 	case *string:
-// 		*v = string(s)
-// 		return nil
-// 	case *interface{}:
-// 		*v = string(s)
-// 		return nil
-// 	default:
-// 		return errInvalidScanTarget
-// 	}
-// }

@@ -30,7 +30,7 @@ func (msg *Message) ReadFrom(r *bufio.Reader) (Value, error) {
 		buffer: p.buffer.String(),
 		hints:  p.hints,
 	}
-	return Value{reply: msg}, nil
+	return Value{msg: msg}, nil
 }
 
 // Parse parses a RESP value from a buffer
@@ -57,7 +57,7 @@ func (msg *Message) Reset() {
 // Value returns the root Value node
 func (msg *Message) Value() Value {
 	if len(msg.hints) > 0 {
-		return Value{reply: msg}
+		return Value{msg: msg}
 	}
 	return Value{}
 }
@@ -133,7 +133,7 @@ func (msg *Message) deflectArray(target reflect.Value, h *hint) error {
 		if uint32(target.Len()) != h.size {
 			return fmt.Errorf("Invalid target size %d", target.Len())
 		}
-		node := Value{index: h.offset, reply: msg}
+		node := Value{index: h.offset, msg: msg}
 		v := reflect.New(target.Type().Elem())
 		for i := 0; i < target.Len(); i++ {
 			if err := node.Decode(v.Interface()); err != nil {
@@ -151,7 +151,7 @@ func (msg *Message) deflectArray(target reflect.Value, h *hint) error {
 		target.Set(reflect.MakeMap(typ))
 		key := reflect.New(typ.Key())
 		val := reflect.New(typ.Elem())
-		node := Value{index: h.offset, reply: msg}
+		node := Value{index: h.offset, msg: msg}
 		for i := uint32(0); i < h.size; i += 2 {
 			if err := node.Decode(key.Interface()); err != nil {
 				return fmt.Errorf("Invalid key %d: %s", i, err)
@@ -177,7 +177,7 @@ func (msg *Message) decodeBulkStringSlice(a *[]string, h *hint) error {
 	}
 	arr := internal.MakeSliceString(*a, h.size)
 	var s BulkString
-	node := Value{index: h.offset, reply: msg}
+	node := Value{index: h.offset, msg: msg}
 	for i := range arr {
 		if err := s.UnmarshalRESP(node); err != nil {
 			return fmt.Errorf("Invalid element %d: %s", i, err)
@@ -201,7 +201,7 @@ func (msg *Message) decodeBulkStringMap(h *hint) (map[string]string, error) {
 	}
 	m := make(map[string]string, h.size/2)
 	var key, val BulkString
-	node := Value{index: h.offset, reply: msg}
+	node := Value{index: h.offset, msg: msg}
 	for i := uint32(0); i < h.size; i += 2 {
 		if err := key.UnmarshalRESP(node); err != nil || key.Null() {
 			return nil, fmt.Errorf("Invalid pair key %s", err)
