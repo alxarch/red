@@ -23,15 +23,16 @@ func Test_Pool(t *testing.T) {
 	var total int64
 	defer pool.Close()
 	defer pool.DoCommand(nil, "FLUSHDB")
-	c, err := pool.Client()
-	if err != nil {
-		t.Errorf("Unexpected client error: %s", err)
-		return
-	}
-	if err := c.Close(); err != nil {
-		t.Errorf("Unexpected close error: %s", err)
-		return
-	}
+	// c := new(red.Batch)
+	// c, err := pool.Client()
+	// if err != nil {
+	// 	t.Errorf("Unexpected client error: %s", err)
+	// 	return
+	// }
+	// if err := c.Close(); err != nil {
+	// 	t.Errorf("Unexpected close error: %s", err)
+	// 	return
+	// }
 
 	now := time.Now()
 	key := fmt.Sprintf("fastredis:%d", now.UnixNano())
@@ -41,25 +42,27 @@ func Test_Pool(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			p, err := pool.Client()
+			conn, err := pool.Get()
 			if err != nil {
 				t.Errorf("Unexpected managed error: %s", err)
 				return
 			}
+			defer conn.Close()
+			p := new(red.Batch)
 			var n resp.Integer
 			{
 				hset := p.HSet(key, field, "baz")
 				hset.Bind(&n)
-				p.Sync()
+				conn.DoBatch(p)
 				n, err := hset.Reply()
 				if err != nil {
 					t.Errorf("WTF %s %d", err, n)
 				}
 			}
 			atomic.AddInt64(&total, int64(n))
-			if err := p.Close(); err != nil {
-				t.Errorf("Unexpected close error: %s", err)
-			}
+			// if err := p.Close(); err != nil {
+			// 	t.Errorf("Unexpected close error: %s", err)
+			// }
 		}(i)
 	}
 	wg.Wait()

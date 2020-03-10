@@ -20,11 +20,10 @@ type Conn struct {
 
 	conn    net.Conn
 	err     error
-	w       Writer
+	w       resp.Writer
 	r       resp.Stream
 	options ConnOptions
 
-	managed bool
 	state   pipeline.State
 	scripts map[Arg]string // Loaded scripts
 
@@ -36,9 +35,9 @@ type Conn struct {
 
 // WriteCommand writes a redis command to the pipeline buffer updating the state
 func (conn *Conn) WriteCommand(name string, args ...Arg) error {
-	if conn.managed {
-		return errConnManaged
-	}
+	// if conn.managed {
+	// 	return errConnManaged
+	// }
 	if !conn.options.Debug {
 		name, args = conn.rewriteCommand(name, args)
 	}
@@ -47,7 +46,7 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 		return fmt.Errorf("CLIENT commands not allowed")
 	}
 
-	if err := conn.w.WriteCommand(conn.options.KeyPrefix, name, args...); err != nil {
+	if err := WriteCommand(&conn.w, conn.options.KeyPrefix, name, args...); err != nil {
 		conn.closeWithError(err)
 		return err
 	}
@@ -72,7 +71,7 @@ func (conn *Conn) DoCommand(dest interface{}, name string, args ...Arg) error {
 	return nil
 }
 
-func (conn *Conn) clientReadValue() (pipeline.Entry, resp.Value, error) {
+func (conn *Conn) clientReadValue(skip bool) (pipeline.Entry, resp.Value, error) {
 	if err := conn.flush(); err != nil {
 		return pipeline.Entry{}, resp.Value{}, err
 	}
@@ -84,7 +83,13 @@ func (conn *Conn) clientReadValue() (pipeline.Entry, resp.Value, error) {
 		if entry.Skip() {
 			continue
 		}
-		v, err := conn.readValue(entry)
+		var v resp.Value
+		var err error
+		if skip {
+			err = conn.discardValue(entry)
+		} else {
+			v, err = conn.readValue(entry)
+		}
 		if err != nil {
 			conn.closeWithError(err)
 		}
@@ -92,54 +97,134 @@ func (conn *Conn) clientReadValue() (pipeline.Entry, resp.Value, error) {
 	}
 }
 
-// Scan decodes a reply to x
-func (conn *Conn) Scan(x interface{}) error {
+func (conn *Conn) scanExec(entry pipeline.Entry, dest []interface{}) error {
+	v, err := conn.readValue(entry)
+	if err != nil {
+		conn.closeWithError(err)
+		return err
+	}
+	if v.NullArray() {
+		return fmt.Errorf("MULTI/EXEC transaction aborted due to WATCH")
+	}
+	if err := v.Err(); err != nil {
+		return fmt.Errorf("MULTI/EXEC transaction aborted %s", err)
+	}
+	if dest == nil {
+		return nil
+	}
+	iter := v.Iter()
+	for _, x := range dest {
+		if !iter.More() {
+			return fmt.Errorf("Invalid multi size %d > %d", len(dest), v.Len())
+		}
+		if x != nil {
+			if err := iter.Value().Decode(x); err != nil {
+				return err
+			}
+		}
+		iter.Next()
+	}
+	return nil
+}
+
+// ScanMulti scans the results of a MULTI/EXEC transaction
+func (conn *Conn) ScanMulti(dest ...interface{}) error {
 	if conn.err != nil {
 		return conn.err
 	}
-	if conn.managed {
-		return errConnManaged
+	// if conn.managed {
+	// 	return errConnManaged
+	// }
+	if err := conn.flush(); err != nil {
+		return err
 	}
+	if conn.options.WriteOnly {
+		return errConnWriteOnly
+	}
+	entry := conn.state.Peek()
+	if !entry.Multi() {
+		return fmt.Errorf("Non multi entry ahead %v", entry)
+	}
+	for {
+		entry, ok := conn.state.Pop()
+		if !ok {
+			return ErrNoReplies
+		}
+		switch {
+		case entry.Skip():
+			continue
+		case entry.Multi():
+			v, err := conn.readValue(entry)
+			if err != nil {
+				conn.closeWithError(err)
+				return err
+			}
+			var isOK AssertOK
+			if err := v.Decode(&isOK); err != nil {
+				return fmt.Errorf("MULTI/EXEC failed: %s", err)
+			}
+		case entry.Discard():
+			return fmt.Errorf("MULTI/EXEC transaction discarded")
+		case entry.Exec():
+			return conn.scanExec(entry, dest)
+		case entry.Queued():
+			if err := conn.discardValue(entry); err != nil {
+				conn.closeWithError(err)
+				return err
+			}
+		default:
+			return fmt.Errorf("Invalid MULTI/EXEC entry %v", entry)
+		}
+	}
+}
+
+// Scan decodes a reply to dest
+// If so keep the deadline(?) so an appropriate timeout is set next time
+// XXX (see below) Other solution: return an error on write if a blocking command skips the reply
+// Edit: This is nuts, the timeout is on the server. Since we are writing
+// the command in a pipeline we cannot know when the server will set the timeout
+// It's plain and simple to only allow blocking commands on a `clean` connection
+// and handle the timeouts appropriately there.
+// XXX (see below) OTOH it's plausible that a blocking command could be the last step in
+// a MULTI/EXEC transaction
+// Edit: From testing via redis-cli it seems that the server does *NOT*
+// respect the timeout when a blocking command is inside MULTI/EXEC block
+// It executes the pop immediately if a value is available or return a nil response
+// Edit: This is also the case for client reply skip followed by BLPOP...
+// Edit: CLIENT REPLY SKIP and blocking commands don't mix well
+// If an error occurs because the command was wrong nothing is returned
+// Otherwise the SKIP is ignored and does *NOT* carry over to the next command
+// Because of all these intricacies the best thing to do is to
+// a) disallow client reply subcommand entirely and only use it internally - DONE
+// b) ignore the timeout of blocking commands when queued - DONE
+// c) maybe change the way timeout is stored in an `cmd.Entry`
+//    so that it stores the deadline when it is written to the pipeline
+//    This is not urgent as setting a lax deadline is not so harmful if
+//    the connection is healthy
+func (conn *Conn) Scan(dest interface{}) error {
+	if conn.err != nil {
+		return conn.err
+	}
+	// if conn.managed {
+	// 	return errConnManaged
+	// }
 	if conn.options.WriteOnly {
 		return errConnWriteOnly
 	}
 	if err := conn.flush(); err != nil {
 		return err
 	}
-
 	for {
 		entry, ok := conn.state.Pop()
 		if !ok {
 			return ErrNoReplies
 		}
-		// If so keep the deadline(?) so an appropriate timeout is set next time
-		// XXX (see below) Other solution: return an error on write if a blocking command skips the reply
-		// Edit: This is nuts, the timeout is on the server. Since we are writing
-		// the command in a pipeline we cannot know when the server will set the timeout
-		// It's plain and simple to only allow blocking commands on a `clean` connection
-		// and handle the timeouts appropriately there.
-		// XXX (see below) OTOH it's plausible that a blocking command could be the last step in
-		// a MULTI/EXEC transaction
-		// Edit: From testing via redis-cli it seems that the server does *NOT*
-		// respect the timeout when a blocking command is inside MULTI/EXEC block
-		// It executes the pop immediately if a value is available or return a nil response
-		// Edit: This is also the case for client reply skip followed by BLPOP...
-		// Edit: CLIENT REPLY SKIP and blocking commands don't mix well
-		// If an error occurs because the command was wrong nothing is returned
-		// Otherwise the SKIP is ignored and does *NOT* carry over to the next command
-		// Because of all these intricacies the best thing to do is to
-		// a) disallow client reply subcommand entirely and only use it internally - DONE
-		// b) ignore the timeout of blocking commands when queued - DONE
-		// c) maybe change the way timeout is stored in an `cmd.Entry`
-		//    so that it stores the deadline when it is written to the pipeline
-		//    This is not urgent as setting a lax deadline is not so harmful if
-		//    the connection is healthy
 		if entry.Skip() {
 			continue
 		}
 		var v resp.Value
 		var err error
-		if x == nil {
+		if dest == nil {
 			err = conn.discardValue(entry)
 		} else {
 			v, err = conn.readValue(entry)
@@ -148,8 +233,8 @@ func (conn *Conn) Scan(x interface{}) error {
 			conn.closeWithError(err)
 			return err
 		}
-		if x != nil {
-			return v.Decode(x)
+		if dest != nil {
+			return v.Decode(dest)
 		}
 		return nil
 
@@ -183,10 +268,10 @@ var (
 	errConnWriteOnly = errors.New("Connection write only")
 )
 
-// Managed checks if a connection is managed by a client
-func (conn *Conn) Managed() bool {
-	return conn.managed
-}
+// // Managed checks if a connection is managed by a client
+// func (conn *Conn) Managed() bool {
+// 	return conn.managed
+// }
 
 // Dirty checkd if a connection has pending replies to scan
 func (conn *Conn) Dirty() bool {
@@ -225,9 +310,9 @@ func (conn *Conn) Reset(options *ConnOptions) error {
 		return conn.err
 	}
 
-	if conn.managed {
-		return errConnManaged
-	}
+	// if conn.managed {
+	// 	return errConnManaged
+	// }
 	if options == nil {
 		options = &conn.options
 	} else {
@@ -300,7 +385,7 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 		// NOTE: any write error in conn.cmd is sticky so it will be returned
 		// by the conn.WriteCommand call at the end of the function
 
-		_ = conn.w.WriteCommand(conn.options.KeyPrefix, "CLIENT", String("REPLY"), String("SKIP"))
+		_ = WriteCommand(&conn.w, conn.options.KeyPrefix, "CLIENT", String("REPLY"), String("SKIP"))
 		conn.updatePipeline("CLIENT", String("REPLY"), String("SKIP"))
 		return conn.WriteCommand(name, args...)
 	}
@@ -308,26 +393,6 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 
 // flush flushes the pipeline buffer
 func (conn *Conn) flush() error {
-	// if conn.err != nil {
-	// 	return conn.err
-	// }
-	// state := &conn.state
-	// if state.Len() == 0 {
-	// 	return nil
-	// }
-	// if state.IsMulti() {
-	// 	return fmt.Errorf("Cannot flush during MULTI/EXEC transaction")
-	// }
-
-	// // Pad leftover skip commands with "PING"
-	// if state.Skip() {
-	// 	if err := conn.WriteCommand("PING"); err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// _ = state.Flush(&conn.replies)
-
 	if err := conn.w.Flush(); err != nil {
 		conn.closeWithError(err)
 		return err
@@ -401,25 +466,25 @@ func (conn *Conn) readValue(entry pipeline.Entry) (resp.Value, error) {
 	return conn.r.Next()
 }
 
-func (conn *Conn) manage() {
-	conn.managed = true
-}
+// func (conn *Conn) manage() {
+// 	conn.managed = true
+// }
 
-func (conn *Conn) unmanage() {
-	conn.managed = false
-}
+// func (conn *Conn) unmanage() {
+// 	conn.managed = false
+// }
 
-func (conn *Conn) getClient() *Client {
-	if conn.pool != nil {
-		return conn.pool.getClient()
-	}
-	return new(Client)
-}
-func (conn *Conn) putClient(client *Client) {
-	if conn.pool != nil {
-		conn.pool.putClient(client)
-	}
-}
+// func (conn *Conn) getClient() *Client {
+// 	if conn.pool != nil {
+// 		return conn.pool.getClient()
+// 	}
+// 	return new(Client)
+// }
+// func (conn *Conn) putClient(client *Client) {
+// 	if conn.pool != nil {
+// 		conn.pool.putClient(client)
+// 	}
+// }
 
 // Auth authenticates a connection
 func (conn *Conn) Auth(password string) error {
@@ -430,22 +495,22 @@ func (conn *Conn) Auth(password string) error {
 	return nil
 }
 
-// Client handles over the connection to be managed by a red.Client
-func (conn *Conn) Client() (*Client, error) {
-	if conn.err != nil {
-		return nil, conn.err
-	}
-	if conn.managed {
-		return nil, fmt.Errorf("Connection already managed")
-	}
-	if conn.Dirty() {
-		return nil, fmt.Errorf("Connection pending replies")
-	}
-	client := conn.getClient()
-	conn.manage()
-	client.conn = conn
-	return client, nil
-}
+// // Client handles over the connection to be managed by a red.Client
+// func (conn *Conn) Client() (*Client, error) {
+// 	if conn.err != nil {
+// 		return nil, conn.err
+// 	}
+// 	if conn.managed {
+// 		return nil, fmt.Errorf("Connection already managed")
+// 	}
+// 	if conn.Dirty() {
+// 		return nil, fmt.Errorf("Connection pending replies")
+// 	}
+// 	client := conn.getClient()
+// 	conn.manage()
+// 	client.conn = conn
+// 	return client, nil
+// }
 
 func (conn *Conn) updatePipeline(name string, args ...Arg) {
 	switch name {

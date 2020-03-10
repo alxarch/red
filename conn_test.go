@@ -22,7 +22,7 @@ func TestConn(t *testing.T) {
 	defer conn.DoCommand(nil, "FLUSHDB")
 	conn.WriteCommand("SELECT", red.Int(10))
 	conn.WriteQuick("SET", "foo", "bar")
-	conn.WriteQuick("KEYS", "", "*")
+	conn.WriteCommand("KEYS", red.String("*"))
 	conn.WriteCommand("FLUSHDB")
 	if err := conn.DoCommand(nil, "PING"); err == nil {
 		t.Errorf("Do should fail")
@@ -133,14 +133,11 @@ func TestConn_Multi(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		client, err := conn.Client()
-		defer client.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
+		p := red.AcquireBatch()
+		defer red.ReleaseBatch(p)
 		var bar string
-		client.GetSet("foo", "baz").Bind(&bar)
-		if err := client.Sync(); err != nil {
+		p.GetSet("foo", "baz").Bind(&bar)
+		if err := conn.DoBatch(p); err != nil {
 			t.Errorf("GETSET failed %s", err)
 		}
 		if bar != "bar" {
@@ -153,19 +150,25 @@ func TestConn_Multi(t *testing.T) {
 		conn.WriteCommand("SET", red.QuickArgs("foo", "foo")...)
 		conn.WriteCommand("EXEC")
 		var ok resp.SimpleString
-		conn.Scan(&ok)
-		if ok != red.StatusOK {
-			t.Errorf("MULTI not OK %q", ok)
+		if err := conn.ScanMulti(&ok); err == nil {
+			t.Errorf("Multi didn't fail")
 		}
-		var queued resp.SimpleString
-		conn.Scan(&queued)
-		if queued != red.StatusQueued {
-			t.Errorf("Set not Queued %q", queued)
+		if err := conn.Scan(nil); err != red.ErrNoReplies {
+			t.Errorf("Multi didn't consume all replies %s", err)
+
 		}
-		var foo string
-		if err := conn.Scan([]interface{}{&foo}); err == nil {
-			t.Errorf("MULTI didn't fail %q", foo)
-		}
+		// if ok != red.StatusOK {
+		// 	t.Errorf("SET not OK %q", ok)
+		// }
+		// var queued resp.SimpleString
+		// conn.Scan(&queued)
+		// if queued != red.StatusQueued {
+		// 	t.Errorf("Set not Queued %q", queued)
+		// }
+		// var foo string
+		// if err := conn.Scan([]interface{}{&foo}); err == nil {
+		// 	t.Errorf("MULTI didn't fail %q", foo)
+		// }
 
 	}
 

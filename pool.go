@@ -36,7 +36,7 @@ type Pool struct {
 	stats struct {
 		dials, hits, misses, timeouts int64
 	}
-	clients sync.Pool // local pool of clients
+	// clients sync.Pool // local pool of clients
 }
 
 // PoolStats counts pool statistics
@@ -60,19 +60,19 @@ func (p *Pool) Stats() PoolStats {
 	return stats
 }
 
-// Client waits indefinetely for a client to become available
-func (p *Pool) Client() (*Client, error) {
-	return p.ClientTimeout(0)
-}
+// // Client waits indefinetely for a client to become available
+// func (p *Pool) Client() (*Client, error) {
+// 	return p.ClientTimeout(0)
+// }
 
-// ClientTimeout waits `timeout` for a client to become available
-func (p *Pool) ClientTimeout(timeout time.Duration) (*Client, error) {
-	conn, err := p.GetTimeout(timeout)
-	if err != nil {
-		return nil, err
-	}
-	return conn.Client()
-}
+// // ClientTimeout waits `timeout` for a client to become available
+// func (p *Pool) ClientTimeout(timeout time.Duration) (*Client, error) {
+// 	conn, err := p.GetTimeout(timeout)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return conn.Client()
+// }
 
 // GetTimeout waits `timeout` to get a connection from the pool
 //
@@ -127,6 +127,17 @@ func (p *Pool) DoCommand(dest interface{}, cmd string, args ...Arg) error {
 	}
 	defer conn.Close()
 	return conn.DoCommand(dest, cmd, args...)
+}
+
+// DoBatch executes a batch on a pool connection
+func (p *Pool) DoBatch(b *Batch) error {
+	conn, err := p.Get()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.DoBatch(b)
+
 }
 
 var (
@@ -192,20 +203,20 @@ func (p *Pool) minConnections() int {
 	return p.maxConnections()
 }
 
-func (p *Pool) getClient() *Client {
-	if client, ok := p.clients.Get().(*Client); ok {
-		return client
-	}
-	return new(Client)
-}
+// func (p *Pool) getClient() *Client {
+// 	if client, ok := p.clients.Get().(*Client); ok {
+// 		return client
+// 	}
+// 	return new(Client)
+// }
 
-func (p *Pool) putClient(client *Client) {
-	if client == nil {
-		return
-	}
-	client.clear()
-	p.clients.Put(client)
-}
+// func (p *Pool) putClient(client *Client) {
+// 	if client == nil {
+// 		return
+// 	}
+// 	client.clear()
+// 	p.clients.Put(client)
+// }
 
 func (p *Pool) init() {
 	p.mu.Lock()

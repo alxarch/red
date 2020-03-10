@@ -1,7 +1,6 @@
 package red
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"net"
@@ -120,26 +119,23 @@ func WrapConn(conn net.Conn, options *ConnOptions) (*Conn, error) {
 		options = new(ConnOptions)
 	}
 	now := time.Now()
+	sizeR := options.ReadBufferSize
+	if sizeR < minBufferSize {
+		sizeR = minBufferSize
+	}
+	sizeW := options.WriteBufferSize
+	if sizeW < minBufferSize {
+		sizeW = minBufferSize
+	}
+	w := timeoutWriter(conn, options.WriteTimeout)
 	c := Conn{
 		conn:       conn,
 		options:    *options,
+		r:          *resp.NewStreamSize(conn, sizeR),
+		w:          *resp.NewWriterSize(w, sizeW),
 		createdAt:  now,
 		lastUsedAt: now,
 		scripts:    make(map[Arg]string),
-	}
-	{
-		// Wire reader
-		size := options.ReadBufferSize
-		if size < minBufferSize {
-			size = minBufferSize
-		}
-		c.r.Reset(bufio.NewReaderSize(conn, size))
-	}
-
-	{
-		// Wire writer
-		w := timeoutWriter(conn, options.WriteTimeout)
-		c.w.Reset(resp.NewWriterSize(w, options.WriteBufferSize))
 	}
 
 	if pass := options.Auth; pass != "" {

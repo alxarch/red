@@ -6,40 +6,13 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
-type batchReply interface {
-	reject(err error)
-	reply(v resp.Value) error
-}
-
-type clientReply struct {
-	cmd  string
-	dest interface{}
-	err  error
-}
-
-func (r *clientReply) reject(err error) {
-	r.dest = nil
-	r.err = err
-}
-
-func (r *clientReply) reply(v resp.Value) error {
-	if r.dest != nil {
-		r.err = v.Decode(r.dest)
-	}
-	return nil
-}
-
-func (r *clientReply) Bind(dest interface{}) {
-	dest, r.dest = r.dest, dest
-}
-
 // ReplyOK is a redis "OK" status reply
 type ReplyOK struct {
 	ok AssertOK
-	clientReply
+	batchReply
 }
 
-var _ batchReply = (*ReplyOK)(nil)
+// var _ batchReply = (*ReplyOK)(nil)
 
 // Reply returns if the status was OK
 func (r *ReplyOK) Reply() (ok bool, err error) {
@@ -51,7 +24,7 @@ func (r *ReplyOK) Reply() (ok bool, err error) {
 // ReplyInteger is a redis integer reply
 type ReplyInteger struct {
 	n resp.Integer
-	clientReply
+	batchReply
 }
 
 // var _ batchReply = (*ReplyInteger)(nil)
@@ -64,7 +37,7 @@ func (r *ReplyInteger) Reply() (int64, error) {
 // ReplySimpleString is a redis status reply
 type ReplySimpleString struct {
 	status resp.SimpleString
-	clientReply
+	batchReply
 }
 
 // var _ batchReply = (*ReplySimpleString)(nil)
@@ -77,7 +50,7 @@ func (r *ReplySimpleString) Reply() (string, error) {
 // ReplyBool is a redis integer reply with values 1 or 0
 type ReplyBool struct {
 	n resp.Integer
-	clientReply
+	batchReply
 }
 
 // var _ batchReply = (*ReplyBool)(nil)
@@ -90,7 +63,7 @@ func (r *ReplyBool) Reply() (bool, error) {
 // ReplyBulkStringArray is a redis array reply with non-null bulk string elements
 type ReplyBulkStringArray struct {
 	values resp.BulkStringArray
-	clientReply
+	batchReply
 }
 
 // var _ batchReply = (*ReplyBulkStringArray)(nil)
@@ -103,7 +76,7 @@ func (r *ReplyBulkStringArray) Reply() ([]string, error) {
 // ReplyFloat is a redis bulk string reply that is parsed as a float
 type ReplyFloat struct {
 	f float64
-	clientReply
+	batchReply
 }
 
 // Reply returns the float value
@@ -111,26 +84,28 @@ func (r *ReplyFloat) Reply() (float64, error) {
 	return r.f, r.err
 }
 
-func (r *ReplyFloat) reply() *clientReply {
-	r.clientReply.Bind(&r.f)
-	return &r.clientReply
-}
-
 // ReplyAny is a redis reply of any kind
 type ReplyAny struct {
 	value resp.Any
-	clientReply
+	batchReply
 }
 
 // Reply returns the reply as a resp.Any value
 func (r *ReplyAny) Reply() (resp.Any, error) {
-	return r.value, r.err
+	if r.err != nil {
+		return nil, r.err
+	}
+	if err, ok := r.value.(resp.Error); ok {
+		return nil, err
+
+	}
+	return r.value, nil
 }
 
 // ReplyBulkString is a single bulk string reply
 type ReplyBulkString struct {
 	str resp.BulkString
-	clientReply
+	batchReply
 }
 
 // Reply returns the bulk string

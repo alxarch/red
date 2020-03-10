@@ -28,7 +28,7 @@ func (b *batchAPI) Exists(keys ...string) *ReplyInteger {
 // Expire is redis EXPIRE command
 func (b *batchAPI) Expire(key string, ttl time.Duration) *ReplyInteger {
 	b.args.Key(key)
-	b.args.Arg(Seconds(ttl))
+	b.args.Seconds(ttl)
 	return b.doInteger("EXPIRE")
 }
 
