@@ -63,15 +63,15 @@ func TestClient_Multi(t *testing.T) {
 		conn, _ := dial()
 		defer conn.Close()
 		p := new(red.Batch)
-		p.Multi()
-		p.HIncrBy("foo", "bar", 2)
-		p.HIncrBy("foo", "bar", 2)
-		p.HIncrBy("foo", "bar", 2).Bind(&n)
-		exec := p.Exec()
+		m := new(red.Tx)
+		m.HIncrBy("foo", "bar", 2)
+		m.HIncrBy("foo", "bar", 2)
+		m.HIncrBy("foo", "bar", 2).Bind(&n)
+		exec := p.Multi(m)
 		if err := conn.DoBatch(p); err != nil {
 			t.Errorf("Batch failed %s", err)
 		}
-		if _, err := exec.Reply(); err != nil {
+		if err := exec.Err(); err != nil {
 			t.Errorf("EXEC failed %s", err)
 		}
 		if n != 7 {
@@ -82,10 +82,10 @@ func TestClient_Multi(t *testing.T) {
 	// Do a MULTI/EXEC with an HSET on the modified key
 
 	var n int64
-	p.Multi()
-	hset := p.HSet("foo", "bar", "43")
+	m := new(red.Tx)
+	hset := m.HSet("foo", "bar", "43")
 	hset.Bind(&n)
-	multi := p.Exec()
+	exec := p.Multi(m)
 
 	// There should be no error on the task
 	if err := conn.DoBatch(p); err != nil {
@@ -93,14 +93,14 @@ func TestClient_Multi(t *testing.T) {
 	}
 
 	// But HSET should fail because it was inside MULTI
-	if err := multi.Err(); err != resp.ErrNull {
-		t.Errorf("MULTI err %s", err)
+	if err := exec.Err(); err != resp.ErrNull {
+		t.Errorf("EXEC did not fail %s", err)
 	}
 	if n, err := hset.Reply(); err == nil {
 		t.Errorf("HSET err %s %d", err, n)
 	}
 	if n != 0 {
-		t.Errorf("HSET err %s", err)
+		t.Errorf("HSET got through %s, %d", err, n)
 	}
 
 	conn.DoBatch(p)

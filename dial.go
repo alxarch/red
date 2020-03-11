@@ -1,6 +1,7 @@
 package red
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
@@ -129,10 +130,13 @@ func WrapConn(conn net.Conn, options *ConnOptions) (*Conn, error) {
 	}
 	w := timeoutWriter(conn, options.WriteTimeout)
 	c := Conn{
-		conn:       conn,
-		options:    *options,
-		r:          *resp.NewStreamSize(conn, sizeR),
-		w:          *resp.NewWriterSize(w, sizeW),
+		conn:    conn,
+		options: *options,
+		r:       *resp.NewStreamSize(conn, sizeR),
+		pipeline: PipelineWriter{
+			KeyPrefix: options.KeyPrefix,
+			dest:      bufio.NewWriterSize(w, sizeW),
+		},
 		createdAt:  now,
 		lastUsedAt: now,
 		scripts:    make(map[Arg]string),

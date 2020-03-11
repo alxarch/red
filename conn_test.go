@@ -173,3 +173,21 @@ func TestConn_Multi(t *testing.T) {
 	}
 
 }
+
+// func Benchmark_Writer(b *testing.B) {
+// 	buf := bytes.Buffer{}
+// 	w := red.Writer{}
+// 	w.Reset(bufio.NewWriter(&buf))
+
+// 	b.ReportAllocs()
+// 	for i := 0; i <= b.N; i++ {
+// 		w.WriteCommand("SELECT", red.Int(1))
+// 	}
+
+// }
+
+// // func AppendArray(buf []byte, size int64) []byte {
+// // 	buf = append(buf, byte(resp.TypeArray))
+// // 	buf = strconv.AppendInt(buf, size, 10)
+// // 	return append(buf, resp.CRLF...)
+// // }

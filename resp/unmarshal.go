@@ -186,7 +186,7 @@ func (d *DecodeError) Unwrap() error {
 	return d.Reason
 }
 func (d *DecodeError) Error() string {
-	return fmt.Sprintf("RESP decode %s -> %v failed: %s", d.Source.Type(), d.Dest, d.Reason)
+	return fmt.Sprintf("RESP decode %#v -> %#v failed: %s", d.Source, d.Dest, d.Reason)
 }
 
 type Tee []Unmarshaler

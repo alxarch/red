@@ -12,6 +12,24 @@ import (
 type Batch struct {
 	batchAPI
 }
+type Tx struct {
+	batchAPI
+}
+
+func (b *Batch) Multi(tx *Tx) *ReplyTX {
+	reply := ReplyTX{
+		batchReply: batchReply{
+			dest: tx.replies,
+		},
+	}
+	tx.replies = nil
+	_ = b.w.WriteCommand("MULTI")
+	b.replies = append(b.replies, &reply.batchReply)
+	_ = tx.w.WriteTo(&b.w)
+	_ = b.w.WriteCommand("EXEC")
+	tx.Reset()
+	return &reply
+}
 
 var batchPool = sync.Pool{
 	New: func() interface{} {
@@ -146,32 +164,83 @@ func (conn *Conn) doBatch(b *batchAPI) error {
 	return conn.scanBatch(b.replies)
 }
 
+type batchExec []*batchReply
+
+func (tx *batchExec) UnmarshalRESP(value resp.Value) (err error) {
+	queued := *tx
+	var execAbort resp.Error
+	switch {
+	case value.Len() == int64(len(queued)):
+		iter := value.Iter()
+		defer iter.Close()
+		for _, reply := range queued {
+			v := iter.Value()
+			if reply.dest != nil {
+				reply.err = v.Decode(reply.dest)
+			}
+			iter.Next()
+		}
+	case value.NullArray():
+		err = resp.ErrNull
+	case execAbort.UnmarshalRESP(value) == nil:
+		err = execAbort
+	default:
+		err = fmt.Errorf("Invalid EXEC reply %v", value.Any())
+	}
+	if err != nil {
+		for _, reply := range queued {
+			reply.reject(err)
+		}
+	}
+	return
+}
+
+func unwrapDecodeError(err error) error {
+	if err, ok := err.(*resp.DecodeError); ok {
+		return err.Reason
+	}
+	return err
+}
 func (conn *Conn) scanBatch(replies []*batchReply) error {
 	if len(replies) == 0 {
 		return nil
 	}
-	var tx batchTx
+	if err := conn.flush(); err != nil {
+		for _, reply := range replies {
+			reply.reject(err)
+		}
+		return err
+	}
+	// var tx batchTx
 	for i := 0; 0 <= i && i < len(replies); i++ {
 		reply := replies[i]
-		noReply := reply.dest == nil
-		entry, value, err := conn.clientReadValue(noReply)
-		if err != nil {
+		if queued, ok := reply.dest.([]*batchReply); ok {
+			ok := AssertOK{}
+			if err := conn.Scan(&ok); err != nil {
+				err = unwrapDecodeError(err)
+				for i := range queued {
+					queued[i].reject(err)
+				}
+				reply.reject(err)
+				continue
+			}
+			for _, reply := range queued {
+				q := assertQueued{}
+				if err := conn.Scan(&q); err != nil {
+					err = unwrapDecodeError(err)
+					reply.reject(err)
+				}
+			}
+			tx := batchExec(queued)
+			reply.err = unwrapDecodeError(conn.Scan(&tx))
+		} else {
+			reply.err = unwrapDecodeError(conn.Scan(reply.dest))
+		}
+		if err := conn.Err(); err != nil {
 			for _, reply := range replies[i:] {
 				reply.reject(err)
 			}
 			return err
-		}
-		switch {
-		case entry.Exec():
-			tx.Exec(value, reply)
-		case entry.Queued():
-			_ = tx.Queued(value, reply)
-		case entry.Discard():
-			tx.Discard(value, reply)
-		case noReply:
-			// nada
-		default:
-			reply.err = value.Decode(reply.dest)
 		}
 	}
 	return nil
@@ -249,74 +318,4 @@ func (r *batchReply) Err() error {
 }
 func (r *batchReply) Bind(dest interface{}) {
 	r.dest = dest
-}
-
-type batchTx struct {
-	queued []*batchReply
-}
-
-func (tx *batchTx) Discard(value resp.Value, reply *batchReply) {
-	if reply.dest != nil {
-		reply.err = value.Decode(reply.dest)
-	}
-	var ok AssertOK
-	err := ok.UnmarshalRESP(value)
-	if err == nil {
-		err = ErrDiscarded
-	}
-	tx.Reject(err)
-}
-
-func (tx *batchTx) Exec(value resp.Value, reply *batchReply) {
-	var err error
-	var execAbort resp.Error
-	switch {
-	case value.Len() == int64(len(tx.queued)):
-		iter := value.Iter()
-		defer iter.Close()
-		for _, reply := range tx.queued {
-			v := iter.Value()
-			if reply.dest != nil {
-				reply.err = v.Decode(reply.dest)
-			}
-			iter.Next()
-		}
-	case value.NullArray():
-		err = resp.ErrNull
-	case execAbort.UnmarshalRESP(value) == nil:
-		err = execAbort
-	default:
-		err = fmt.Errorf("Invalid EXEC reply %v", value.Any())
-	}
-	if err != nil {
-		tx.Reject(err)
-		reply.reject(err)
-	}
-}
-
-func (tx *batchTx) Queued(value resp.Value, reply *batchReply) error {
-	var status resp.SimpleString
-	err := status.UnmarshalRESP(value)
-	if err != nil {
-		reply.reject(err)
-		tx.queued = append(tx.queued, nil)
-		return nil
-	}
-	if status != StatusQueued {
-		return fmt.Errorf("Invalid QUEUED status %q", status)
-	}
-	tx.queued = append(tx.queued, reply)
-	return nil
-}
-func (tx *batchTx) Reset() {
-	for i := range tx.queued {
-		tx.queued[i] = nil
-	}
-	tx.queued = tx.queued[:0]
-}
-func (tx *batchTx) Reject(err error) {
-	defer tx.Reset()
-	for _, reply := range tx.queued {
-		reply.reject(err)
-	}
 }

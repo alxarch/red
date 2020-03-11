@@ -2,80 +2,128 @@ package pubsub
 
 import (
 	"fmt"
+	"sync"
 
-	"github.com/alxarch/red"
 	"github.com/alxarch/red/resp"
 )
 
 type MessageKind string
 
 const (
-	KindSubscribe   MessageKind = "subscribe"
-	KindUnsubscribe MessageKind = "unsubscribe"
-	KindMessage     MessageKind = "message"
+	KindSubscribe    MessageKind = "subscribe"
+	KindSubscribeP   MessageKind = "psubscribe"
+	KindUnsubscribe  MessageKind = "unsubscribe"
+	KindUnsubscribeP MessageKind = "punsubscribe"
+	KindMessage      MessageKind = "message"
+	KindPong         MessageKind = "pong"
 )
 
-type Message struct {
+type IncomingMessage struct {
 	kind        MessageKind
 	payload     string
 	numChannels int64
 	channel     string
 }
 
-func (m *Message) Kind() MessageKind {
+func (m *IncomingMessage) Kind() MessageKind {
 	return m.kind
 }
 
-func (m *Message) Channel() string {
-	return m.channel
+func (m *IncomingMessage) Channel() (string, bool) {
+	switch m.kind {
+	case KindMessage, KindSubscribe, KindUnsubscribe:
+		return m.channel, true
+	}
+	return "", false
 }
-func (m *Message) Payload() (string, bool) {
+
+func (m *IncomingMessage) Pattern() (string, bool) {
+	switch m.kind {
+	case KindSubscribeP, KindUnsubscribeP:
+		return m.channel, true
+	}
+	return "", false
+}
+
+func (m *IncomingMessage) Payload() (string, bool) {
 	return m.payload, m.kind == KindMessage
 }
-func (m *Message) NumChannels() (int64, bool) {
+func (m *IncomingMessage) NumChannels() (int64, bool) {
 	return m.numChannels, m.kind == KindSubscribe || m.kind == KindUnsubscribe
 }
 
-func (m *Message) UnmarshalRESP(value resp.Value) error {
+func (m *IncomingMessage) UnmarshalRESP(value resp.Value) error {
 	var kind resp.BulkString
-	var channel resp.BulkString
-	var payload resp.Any
-	if err := value.Decode([]interface{}{&kind, &channel, &payload}); err != nil {
-		return err
+	iter := value.Iter()
+	if err := kind.UnmarshalRESP(iter.Value()); err != nil {
+		return fmt.Errorf("Invalid incoming message %v", value.Any())
 	}
-	switch m.kind, m.channel = MessageKind(kind.String), channel.String; m.kind {
+	switch m.kind = MessageKind(kind.String); m.kind {
 	case KindMessage:
-		str, _ := payload.(*resp.BulkString)
+		var str resp.BulkString
+		if !iter.More() {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		iter.Next()
+		if err := str.UnmarshalRESP(iter.Value()); err != nil {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		if !str.Valid {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		m.channel = str.String
+		if !iter.More() {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		iter.Next()
+		if err := str.UnmarshalRESP(iter.Value()); err != nil {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		if !str.Valid {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
 		m.payload = str.String
 		return nil
-	case KindUnsubscribe, KindSubscribe:
-		n, _ := payload.(resp.Integer)
-		m.numChannels = int64(n)
+	case KindPong:
+		if !iter.More() {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		iter.Next()
+		var payload resp.BulkString
+		if err := payload.UnmarshalRESP(iter.Value()); err != nil {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		if !payload.Valid {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		m.payload = payload.String
+		return nil
+	case KindSubscribe, KindUnsubscribe, KindSubscribeP, KindUnsubscribeP:
+		var str resp.BulkString
+		if !iter.More() {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		iter.Next()
+		if err := str.UnmarshalRESP(iter.Value()); err != nil {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		if !str.Valid {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		m.channel = str.String
+		if !iter.More() {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		iter.Next()
+		var numChannels resp.Integer
+		if err := numChannels.UnmarshalRESP(iter.Value()); err != nil {
+			return fmt.Errorf("Invalid incoming message %v", value.Any())
+		}
+		m.numChannels = int64(numChannels)
 		return nil
 	default:
-		return fmt.Errorf("[PUBSUB] Invalid message kind %q", kind.String)
+		return fmt.Errorf("Invalid incoming message %v", value.Any())
 	}
-}
-
-type Subscription struct {
-	Channels []string
-	Pattern  bool
-}
-type unSubscription Subscription
-
-func (s *unSubscription) BuildCommand(args red.ArgBuilder) string {
-	args.Strings(s.Channels...)
-	if s.Pattern {
-		return "PUNSUBSCRIBE"
-	}
-	return "UNSUBSCRIBE"
-}
-func (s *Subscription) BuildCommand(args red.ArgBuilder) string {
-	args.Strings(s.Channels...)
-	if s.Pattern {
-		return "PSUBSCRIBE"
-	}
-	return "SUBSCRIBE"
 }
 
 // type Subscriber struct {
@@ -169,3 +217,52 @@ func (s *Subscription) BuildCommand(args red.ArgBuilder) string {
 // 	}()
 // 	return nil
 // }
+
+type Subscription struct {
+	Channel string
+	Pattern bool
+}
+
+type Subscriptions struct {
+	mu      sync.RWMutex
+	entries map[Subscription]struct{}
+}
+
+func (s *Subscriptions) Subscribe(ch string, pattern bool) {
+	entry := Subscription{
+		Channel: ch,
+		Pattern: pattern,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entries == nil {
+		s.entries = make(map[Subscription]struct{})
+	}
+	s.entries[entry] = struct{}{}
+}
+
+func (s *Subscriptions) Unsubscribe(ch string, pattern bool) {
+	entry := Subscription{
+		Channel: ch,
+		Pattern: pattern,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entries == nil {
+		return
+	}
+	delete(s.entries, entry)
+}
+
+func (s *Subscriptions) Active() (channels, patterns []string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for sub := range s.entries {
+		if sub.Pattern {
+			patterns = append(patterns, sub.Channel)
+		} else {
+			channels = append(channels, sub.Channel)
+		}
+	}
+	return
+}

@@ -110,52 +110,52 @@ func (s *Stream) discardN(n int64) error {
 	return nil
 }
 
-func (s *Stream) Skip() error {
-	if s.err != nil {
-		return s.err
-	}
-	if err := discardNext(s.r); err != nil {
-		s.err = err
-		return err
-	}
-	return nil
+// func (s *Stream) Skip() error {
+// 	if s.err != nil {
+// 		return s.err
+// 	}
+// 	if err := discardNext(s.r); err != nil {
+// 		s.err = err
+// 		return err
+// 	}
+// 	return nil
 
-}
-func (s *Stream) Next() (Value, error) {
-	if s.err != nil {
-		return Value{}, s.err
+// }
+// func (s *Stream) Next() (Value, error) {
+// 	if s.err != nil {
+// 		return Value{}, s.err
+// 	}
+// 	v, err := s.reply.ReadFrom(s.r)
+// 	if err != nil {
+// 		s.err = err
+// 		return Value{}, err
+// 	}
+// 	return v, nil
+// }
+
+func (s *Stream) Decode(x interface{}) error {
+	s.reply.Reset()
+	if x == nil {
+		if err := discardNext(s.r); err != nil {
+			s.err = err
+			return err
+		}
+		return nil
 	}
 	v, err := s.reply.ReadFrom(s.r)
 	if err != nil {
 		s.err = err
-		return Value{}, err
+		return err
 	}
-	return v, nil
+	if err := v.Decode(x); err != nil {
+		return &DecodeError{
+			Reason: err,
+			Source: v.Any(),
+			Dest:   x,
+		}
+	}
+	return nil
 }
-
-// func (s *Stream) Decode(x interface{}) error {
-// 	if x == nil {
-// 		s.reply.Reset()
-// 		if err := discardNext(s.r); err != nil {
-// 			s.err = err
-// 			return err
-// 		}
-// 		return nil
-// 	}
-// 	v, err := s.reply.ReadFrom(s.b)
-// 	if err != nil {
-// 		s.err = err
-// 		return err
-// 	}
-// 	if err := v.Decode(x); err != nil {
-// 		return &DecodeError{
-// 			Reason: err,
-// 			Source: v.Any(),
-// 			Dest:   x,
-// 		}
-// 	}
-// 	return nil
-// }
 
 // discardNext discards a value from a reader
 func discardNext(r *bufio.Reader) (err error) {

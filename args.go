@@ -1,6 +1,8 @@
 package red
 
 import (
+	"bufio"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -376,53 +378,98 @@ func QuickArgs(key string, args ...string) []Arg {
 	return out
 }
 
-// WriteCommand writes a redis command
-func WriteCommand(w *resp.Writer, keyPrefix, name string, args ...Arg) error {
-	if err := w.WriteArray(int64(len(args) + 1)); err != nil {
-		return err
-	}
-	if err := w.WriteBulkString(name); err != nil {
-		return err
-	}
-	return WriteArgs(w, keyPrefix, args...)
+type PipelineWriter struct {
+	KeyPrefix string
+	dest      *bufio.Writer
+	scratch   [64]byte
+	extra     []byte
 }
 
-// WriteArgs writes args as bulk strings to the underlying writer
-func WriteArgs(w *resp.Writer, keyPrefix string, args ...Arg) (err error) {
+func (w *PipelineWriter) Reset(dest *bufio.Writer) {
+	w.dest = dest
+}
+
+func (w *PipelineWriter) writeBulkStringPrefix(prefix, s string) error {
+	w.dest.WriteByte(byte(resp.TypeBulkString))
+	w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(prefix)+len(s)), 10))
+	w.dest.WriteString(resp.CRLF)
+	w.dest.WriteString(prefix)
+	w.dest.WriteString(s)
+	_, err := w.dest.WriteString(resp.CRLF)
+	return err
+
+}
+
+// WriteCommand writes a redis command
+func (w *PipelineWriter) WriteCommand(cmd string, args ...Arg) (err error) {
+	w.dest.WriteByte(byte(resp.TypeArray))
+	w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(args)+1), 10))
+	w.dest.WriteString(resp.CRLF)
+	if err = w.writeBulkStringPrefix("", cmd); err != nil {
+		return
+	}
+	return w.writeArgs(args...)
+}
+
+// Flush flushes the underlying writer
+func (w *PipelineWriter) Flush() error {
+	return w.dest.Flush()
+}
+
+// writeArgs writes args as bulk strings to the underlying writer
+func (w *PipelineWriter) writeArgs(args ...Arg) (err error) {
 	for i := range args {
 		switch arg := &args[i]; arg.typ {
 		case argString:
-			err = w.WriteBulkString(arg.str)
+			err = w.writeBulkStringPrefix("", arg.str)
 		case argKey:
-			err = w.WriteBulkStringPrefix(keyPrefix, arg.str)
+			err = w.writeBulkStringPrefix(w.KeyPrefix, arg.str)
 		case argInt:
-			err = w.WriteBulkStringInt(int64(arg.num))
+			w.extra = strconv.AppendInt(w.extra[:0], int64(arg.num), 10)
+			w.dest.WriteByte(byte(resp.TypeBulkString))
+			w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(w.extra)), 10))
+			w.dest.WriteString(resp.CRLF)
+			w.dest.Write(w.extra)
+			_, err = w.dest.WriteString(resp.CRLF)
 		case argUint:
-			err = w.WriteBulkStringUint(arg.num)
-		case argFloat32:
-			err = w.WriteBulkStringFloat(math.Float64frombits(arg.num))
-		case argFloat64:
-			err = w.WriteBulkStringFloat(math.Float64frombits(arg.num))
+			w.extra = strconv.AppendUint(w.extra[:0], arg.num, 10)
+			w.dest.WriteByte(byte(resp.TypeBulkString))
+			w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(w.extra)), 10))
+			w.dest.WriteString(resp.CRLF)
+			w.dest.Write(w.extra)
+			_, err = w.dest.WriteString(resp.CRLF)
+		case argFloat32, argFloat64:
+			f := math.Float64frombits(arg.num)
+			w.extra = strconv.AppendFloat(w.extra[:0], f, 'f', -1, 64)
+			w.dest.WriteByte(byte(resp.TypeBulkString))
+			w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(w.extra)), 10))
+			w.dest.WriteString(resp.CRLF)
+			w.dest.Write(w.extra)
+			_, err = w.dest.WriteString(resp.CRLF)
 		case argLex:
 			switch byte(arg.num) {
 			case '[':
-				err = w.WriteBulkStringPrefix("[", arg.str)
+				err = w.writeBulkStringPrefix("[", arg.str)
 			case '(':
-				err = w.WriteBulkStringPrefix("(", arg.str)
+				err = w.writeBulkStringPrefix("(", arg.str)
 			default:
-				err = w.WriteBulkString(arg.str)
+				err = w.writeBulkStringPrefix("", arg.str)
 			}
 		case argScore:
 			score := math.Float64frombits(arg.num)
-			if arg.str == "(" {
-				err = w.WriteBulkStringPrefix("(", strconv.FormatFloat(score, 'f', -1, 64))
-			} else {
-				err = w.WriteBulkStringFloat(score)
-			}
+			w.extra = strconv.AppendFloat(w.extra[:0], score, 'f', -1, 64)
+			w.dest.WriteByte(byte(resp.TypeBulkString))
+			w.dest.Write(strconv.AppendInt(w.scratch[:0], int64(len(w.extra)+len(arg.str)), 10))
+			w.dest.WriteString(resp.CRLF)
+			w.dest.WriteString(arg.str)
+			w.dest.Write(w.extra)
+			_, err = w.dest.WriteString(resp.CRLF)
 		case argFalse:
-			err = w.WriteBulkString("false")
+			err = w.writeBulkStringPrefix("", "false")
 		case argTrue:
-			err = w.WriteBulkString("true")
+			err = w.writeBulkStringPrefix("", "true")
+		default:
+			return fmt.Errorf("Invalid arg %q", arg.typ)
 		}
 		if err != nil {
 			return
@@ -430,25 +477,3 @@ func WriteArgs(w *resp.Writer, keyPrefix string, args ...Arg) (err error) {
 	}
 	return
 }
-
-// func Field(field string, value Arg) FieldArg {
-// 	return FieldArg{Field: field, Value: value}
-// }
-
-// type Fields []FieldArg
-
-// type FieldArg struct {
-// 	Field string
-// 	Value Arg
-// }
-
-// func KV(key string, value Arg) KVArg {
-// 	return KVArg{Key: key, Value: value}
-// }
-
-// type KVs []KVArg
-
-// type KVArg struct {
-// 	Key   string
-// 	Value Arg
-// }

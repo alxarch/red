@@ -42,7 +42,7 @@ func (v Value) Decode(x interface{}) error {
 	}
 	h := v.hint()
 	if h == nil {
-		return fmt.Errorf("Invalid RESP value %v", v.Any())
+		return fmt.Errorf("Invalid RESP value %v", nil)
 	}
 	switch h.typ {
 	case TypeBulkString:

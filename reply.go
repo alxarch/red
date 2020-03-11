@@ -141,3 +141,36 @@ func (ok *AssertOK) UnmarshalRESP(v resp.Value) error {
 	}
 	return nil
 }
+
+type assertQueued struct{}
+
+func (*assertQueued) UnmarshalRESP(v resp.Value) error {
+	var status resp.SimpleString
+	if err := status.UnmarshalRESP(v); err != nil {
+		return err
+	}
+	if status != StatusQueued {
+		return fmt.Errorf("Invalid queued status %q", status)
+	}
+	return nil
+}
+
+type ReplyTX struct {
+	batchReply
+}
+
+type AssertNonNullArray struct{}
+
+func (*AssertNonNullArray) UnmarshalRESP(v resp.Value) error {
+	switch typ := v.Type(); typ {
+	case resp.TypeArray:
+		if v.NullArray() {
+			return resp.ErrNull
+		}
+		return nil
+	case resp.TypeError:
+		return v.Err()
+	default:
+		return fmt.Errorf("Invalid RESP array value %q", typ)
+	}
+}

@@ -18,12 +18,13 @@ import (
 type Conn struct {
 	noCopy noCopy //nolint:unused,structcheck
 
-	conn    net.Conn
-	err     error
-	w       resp.Writer
-	r       resp.Stream
-	options ConnOptions
+	conn     net.Conn
+	err      error
+	pipeline PipelineWriter
+	r        resp.Stream
+	options  ConnOptions
 
+	managed bool
 	state   pipeline.State
 	scripts map[Arg]string // Loaded scripts
 
@@ -35,9 +36,9 @@ type Conn struct {
 
 // WriteCommand writes a redis command to the pipeline buffer updating the state
 func (conn *Conn) WriteCommand(name string, args ...Arg) error {
-	// if conn.managed {
-	// 	return errConnManaged
-	// }
+	if conn.managed {
+		return errConnManaged
+	}
 	if !conn.options.Debug {
 		name, args = conn.rewriteCommand(name, args)
 	}
@@ -49,7 +50,7 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 		return fmt.Errorf("Subscribe commands not allowed")
 	}
 
-	if err := WriteCommand(&conn.w, conn.options.KeyPrefix, name, args...); err != nil {
+	if err := conn.pipeline.WriteCommand(name, args...); err != nil {
 		conn.closeWithError(err)
 		return err
 	}
@@ -74,60 +75,70 @@ func (conn *Conn) DoCommand(dest interface{}, name string, args ...Arg) error {
 	return nil
 }
 
-func (conn *Conn) clientReadValue(skip bool) (pipeline.Entry, resp.Value, error) {
-	if err := conn.flush(); err != nil {
-		return pipeline.Entry{}, resp.Value{}, err
-	}
-	for {
-		entry, ok := conn.state.Pop()
-		if !ok {
-			return pipeline.Entry{}, resp.Value{}, ErrNoReplies
-		}
-		if entry.Skip() {
-			continue
-		}
-		var v resp.Value
-		var err error
-		if skip {
-			err = conn.discardValue(entry)
-		} else {
-			v, err = conn.readValue(entry)
-		}
-		if err != nil {
-			conn.closeWithError(err)
-		}
-		return entry, v, err
-	}
+// func (conn *Conn) clientScanValue(skip bool) (pipeline.Entry, resp.Value, error) {
+// 	if err := conn.flush(); err != nil {
+// 		return pipeline.Entry{}, resp.Value{}, err
+// 	}
+// 	for {
+// 		entry, ok := conn.state.Pop()
+// 		if !ok {
+// 			return pipeline.Entry{}, resp.Value{}, ErrNoReplies
+// 		}
+// 		if entry.Skip() {
+// 			continue
+// 		}
+// 		var v resp.Value
+// 		var err error
+// 		if skip {
+// 			err = conn.discardValue(entry)
+// 		} else {
+// 			v, err = conn.readValue(entry)
+// 		}
+// 		if err != nil {
+// 			conn.closeWithError(err)
+// 		}
+// 		return entry, v, err
+// 	}
+// }
+
+type replyExec struct {
+	dest []interface{}
+	err  error
 }
 
-func (conn *Conn) scanExec(entry pipeline.Entry, dest []interface{}) error {
-	v, err := conn.readValue(entry)
-	if err != nil {
-		conn.closeWithError(err)
-		return err
-	}
-	if v.NullArray() {
-		return fmt.Errorf("MULTI/EXEC transaction aborted due to WATCH")
-	}
-	if err := v.Err(); err != nil {
-		return fmt.Errorf("MULTI/EXEC transaction aborted %s", err)
-	}
-	if dest == nil {
-		return nil
-	}
-	iter := v.Iter()
-	for _, x := range dest {
-		if !iter.More() {
-			return fmt.Errorf("Invalid multi size %d > %d", len(dest), v.Len())
+func (r *replyExec) UnmarshalRESP(v resp.Value) error {
+	switch {
+	case v.NullArray():
+		return fmt.Errorf("MULTI/EXEC transaction WATCH failed")
+	case v.Type() == resp.TypeArray:
+		iter := v.Iter()
+		for i, x := range r.dest {
+			if !iter.More() {
+				return fmt.Errorf("Invalid multi size %d > %d", len(r.dest), v.Len())
+			}
+			if x != nil {
+				if err := iter.Value().Decode(x); err != nil {
+					r.dest[i] = err
+				} else {
+					r.dest[i] = nil
+				}
+			}
+			iter.Next()
 		}
-		if x != nil {
-			if err := iter.Value().Decode(x); err != nil {
+		if iter.More() {
+			return fmt.Errorf("Invalid target size %d < %d", len(r.dest), v.Len())
+		}
+		for _, x := range r.dest {
+			if err, ok := x.(error); ok && err != nil {
 				return err
 			}
 		}
-		iter.Next()
+		return nil
+	case v.Err() != nil:
+		return fmt.Errorf("MULTI/EXEC transaction aborted %s", v.Err())
+	default:
+		return fmt.Errorf("Invalid exec reply %v", v.Any())
 	}
-	return nil
 }
 
 // ScanMulti scans the results of a MULTI/EXEC transaction
@@ -135,9 +146,9 @@ func (conn *Conn) ScanMulti(dest ...interface{}) error {
 	if conn.err != nil {
 		return conn.err
 	}
-	// if conn.managed {
-	// 	return errConnManaged
-	// }
+	if conn.managed {
+		return errConnManaged
+	}
 	if err := conn.flush(); err != nil {
 		return err
 	}
@@ -157,22 +168,19 @@ func (conn *Conn) ScanMulti(dest ...interface{}) error {
 		case entry.Skip():
 			continue
 		case entry.Multi():
-			v, err := conn.readValue(entry)
-			if err != nil {
-				conn.closeWithError(err)
-				return err
-			}
 			var isOK AssertOK
-			if err := v.Decode(&isOK); err != nil {
-				return fmt.Errorf("MULTI/EXEC failed: %s", err)
+			if err := conn.scanValue(&isOK, entry); err != nil {
+				return fmt.Errorf("MULTI failed: %s", err)
 			}
 		case entry.Discard():
 			return fmt.Errorf("MULTI/EXEC transaction discarded")
 		case entry.Exec():
-			return conn.scanExec(entry, dest)
+			exec := replyExec{
+				dest: dest,
+			}
+			return conn.scanValue(&exec, entry)
 		case entry.Queued():
-			if err := conn.discardValue(entry); err != nil {
-				conn.closeWithError(err)
+			if err := conn.scanValue(nil, entry); err != nil {
 				return err
 			}
 		default:
@@ -208,9 +216,9 @@ func (conn *Conn) Scan(dest interface{}) error {
 	if conn.err != nil {
 		return conn.err
 	}
-	// if conn.managed {
-	// 	return errConnManaged
-	// }
+	if conn.managed {
+		return errConnManaged
+	}
 	if conn.options.WriteOnly {
 		return errConnWriteOnly
 	}
@@ -222,25 +230,9 @@ func (conn *Conn) Scan(dest interface{}) error {
 		if !ok {
 			return ErrNoReplies
 		}
-		if entry.Skip() {
-			continue
+		if !entry.Skip() {
+			return conn.scanValue(dest, entry)
 		}
-		var v resp.Value
-		var err error
-		if dest == nil {
-			err = conn.discardValue(entry)
-		} else {
-			v, err = conn.readValue(entry)
-		}
-		if err != nil {
-			conn.closeWithError(err)
-			return err
-		}
-		if dest != nil {
-			return v.Decode(dest)
-		}
-		return nil
-
 	}
 
 }
@@ -388,7 +380,7 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 		// NOTE: any write error in conn.cmd is sticky so it will be returned
 		// by the conn.WriteCommand call at the end of the function
 
-		_ = WriteCommand(&conn.w, conn.options.KeyPrefix, "CLIENT", String("REPLY"), String("SKIP"))
+		_ = conn.pipeline.WriteCommand("CLIENT", String("REPLY"), String("SKIP"))
 		conn.updatePipeline("CLIENT", String("REPLY"), String("SKIP"))
 		return conn.WriteCommand(name, args...)
 	}
@@ -396,7 +388,7 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 
 // flush flushes the pipeline buffer
 func (conn *Conn) flush() error {
-	if err := conn.w.Flush(); err != nil {
+	if err := conn.pipeline.Flush(); err != nil {
 		conn.closeWithError(err)
 		return err
 	}
@@ -412,7 +404,7 @@ func (conn *Conn) drain() error {
 		if entry.Skip() {
 			continue
 		}
-		if err := conn.discardValue(entry); err != nil {
+		if err := conn.scanValue(nil, entry); err != nil {
 			conn.closeWithError(err)
 			return err
 		}
@@ -456,17 +448,18 @@ func (conn *Conn) resetTimeout(entry pipeline.Entry) error {
 	return conn.conn.SetReadDeadline(time.Time{})
 }
 
-func (conn *Conn) discardValue(entry pipeline.Entry) error {
+func (conn *Conn) scanValue(dest interface{}, entry pipeline.Entry) error {
 	if err := conn.resetTimeout(entry); err != nil {
+		conn.closeWithError(err)
 		return err
 	}
-	return conn.r.Skip()
-}
-func (conn *Conn) readValue(entry pipeline.Entry) (resp.Value, error) {
-	if err := conn.resetTimeout(entry); err != nil {
-		return resp.Value{}, err
+	if err := conn.r.Decode(dest); err != nil {
+		if e := conn.r.Err(); e != nil {
+			conn.err = e
+		}
+		return err
 	}
-	return conn.r.Next()
+	return nil
 }
 
 // func (conn *Conn) manage() {
