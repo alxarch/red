@@ -301,6 +301,17 @@ func (a *ArgBuilder) Strings(args ...string) {
 	}
 }
 
+func (a *ArgBuilder) KeysUnique(key string, keys ...string) {
+	a.Key(key)
+	if len(key) > 0 {
+		head, tail := keys[0], keys[1:]
+		if head != key {
+			a.Key(head)
+		}
+		a.Keys(tail...)
+	}
+}
+
 // Unique adds multiple string arguments omitting the first argument of args if it's equal to arg
 func (a *ArgBuilder) Unique(arg string, args ...string) {
 	a.String(arg)
