@@ -231,3 +231,36 @@ type NopUnmarshaler struct{}
 func (NopUnmarshaler) UnmarshalRESP(_ Value) error {
 	return nil
 }
+
+type SimpleStringRecord map[string]Any
+
+func (m *SimpleStringRecord) UnmarshalRESP(v Value) error {
+	any := v.Any()
+	switch any := any.(type) {
+	case Array:
+		if any == nil {
+			*m = nil
+			return nil
+		}
+		if len(any)%2 != 0 {
+			return fmt.Errorf("Invalid array size %d", len(any))
+		}
+		values := make(map[string]Any, len(any)/2)
+		var k, v Any
+		for len(any) >= 2 {
+			k, v, any = any[0], any[1], any[2:]
+			key, ok := k.(SimpleString)
+			if !ok {
+				return fmt.Errorf("Unexpected key value %v", k)
+			}
+			values[string(key)] = v
+		}
+		*m = values
+		return nil
+	case Error:
+		return any
+	default:
+		return fmt.Errorf("Invalid map value %v", any)
+	}
+
+}
