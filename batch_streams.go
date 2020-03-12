@@ -6,30 +6,21 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
-type XAck struct {
-	Key   string
-	Group string
-	IDs   []string
-	// replyInteger
-}
-
-// Command implements Commander interface
-func (b *batchAPI) XAck(key, group string, ids ...string) *ReplyInteger {
+// XAck removes one or multiple messages from the pending entries list (PEL) of a stream consumer group.
+// XACK key group ID [ID ...]
+func (b *batchAPI) XAck(key, group string, id string, ids ...string) *ReplyInteger {
 	b.args.Key(key)
 	b.args.String(group)
-	b.args.Strings(ids...)
+	b.args.Unique(id, ids...)
 	return b.doInteger("XACK")
 }
 
-type XAdd struct {
-	Key    string
-	MaxLen int64
-	ID     string
-	Fields []HArg
-	// replyBulkString
-}
-
-// Command implements Commander interface
+// XAdd appends the specified stream entry to the stream at the specified key.
+//
+//     XADD key ID field value [field value ...]
+//
+// If the key does not exist, as a side effect of running this command,
+// the key is created with a stream value.
 func (b *batchAPI) XAdd(key string, maxLen int64, id string, fields ...HArg) *ReplyBulkString {
 	b.args.Key(key)
 	if maxLen > 0 {
@@ -49,6 +40,28 @@ func (b *batchAPI) XAdd(key string, maxLen int64, id string, fields ...HArg) *Re
 	return b.doBulkString("XADD")
 }
 
+// XClaim claims a pending message in a consumer group.
+//
+//   XCLAIM key group consumer min-idle-time ID [ID ...] [IDLE ms] [TIME ms-unix-time] [RETRYCOUNT count] [FORCE] [JUSTID]
+//
+//   Available since 5.0.0.
+//
+//   Time complexity: O(log N) with N being the number of messages in the PEL of the consumer group.
+//
+// In the context of a stream consumer group, this command changes the ownership of a pending message,
+// so that the new owner is the consumer specified as the command argument. Normally this is what happens:
+//
+// 1. There is a stream with an associated consumer group.
+// 2. Some consumer A reads a message via XREADGROUP from a stream, in the context of that consumer group.
+// 3. As a side effect a pending message entry is created in the pending entries list (PEL)
+//    of the consumer group: it means the message was delivered to a given consumer,
+//    but it was not yet acknowledged via XACK.
+// 4. Then suddenly that consumer fails forever.
+// 5. Other consumers may inspect the list of pending messages, that are stale for quite some time,
+//    using the XPENDING command. In order to continue processing such messages, they use XCLAIM
+//    to acquire the ownership of the message and continue.
+//
+// This dynamic is clearly explained in the [Stream intro documentation](https://redis.io/topics/streams-intro).
 type XClaim struct {
 	Key         string
 	Group       string
@@ -94,7 +107,8 @@ func (b *batchAPI) XDel(key string, ids ...string) *ReplyInteger {
 	return b.doInteger("XDEL")
 }
 
-// XGroupCreate adds an XGROUP CREATE redis command
+// XGroupCreate creates a new consumer group associated with a stream.
+// XGROUP [CREATE key groupname id-or-$]
 func (b *batchAPI) XGroupCreate(key, group, id string, makeStream bool) *ReplyOK {
 	b.args.String("CREATE")
 	b.args.Key(key)
@@ -107,7 +121,8 @@ func (b *batchAPI) XGroupCreate(key, group, id string, makeStream bool) *ReplyOK
 	return b.doSimpleStringOK("XGROUP", 0)
 }
 
-// Command implements Commander interface
+// XGroupSetID sets the consumer group last delivered ID to something else.
+// XGROUP [SETID key groupname id-or-$]
 func (b *batchAPI) XGroupSetID(key, group, id string) *ReplyOK {
 	b.args.String("SETID")
 	b.args.Key(key)
@@ -119,7 +134,7 @@ func (b *batchAPI) XGroupSetID(key, group, id string) *ReplyOK {
 	return b.doSimpleStringOK("XGROUP", 0)
 }
 
-// Command implements Commander interface
+// XGroupDestroy destroys a consumer group
 func (b *batchAPI) XGroupDestroy(key, group string) *ReplyInteger {
 	b.args.String("DESTROY")
 	b.args.Key(key)
@@ -127,7 +142,7 @@ func (b *batchAPI) XGroupDestroy(key, group string) *ReplyInteger {
 	return b.doInteger("XGROUP")
 }
 
-// Command implements Commander interface
+// XGroupDelConsumer removes a specific consumer from a consumer group
 func (b *batchAPI) XGroupDelConsumer(key, group, consumer string) *ReplyInteger {
 	b.args.String("DELCONSUMER")
 	b.args.Key(key)
@@ -136,29 +151,184 @@ func (b *batchAPI) XGroupDelConsumer(key, group, consumer string) *ReplyInteger 
 	return b.doInteger("XGROUP")
 }
 
-func (b *batchAPI) XInfoConsumers(key, group string) *ReplyAny {
+type XInfoStream struct {
+	Length          int64
+	RadixTreeKeys   int64
+	RadixTreeNodes  int64
+	Groups          int64
+	LastGeneratedID resp.BulkString
+	FirstEntry      XInfoEntry
+	LastEntry       XInfoEntry
+}
+type ReplyXInfoStream struct {
+	stream XInfoStream
+	batchReply
+}
+
+func (r *ReplyXInfoStream) Reply() (XInfoStream, error) {
+	return r.stream, r.err
+}
+
+func (info *XInfoStream) UnmarshalRESP(v resp.Value) error {
+	var values resp.SimpleStringRecord
+	if err := values.UnmarshalRESP(v); err != nil {
+		return err
+	}
+	s := XInfoStream{}
+	if n, ok := values["length"].(resp.Integer); ok {
+		s.Length = int64(n)
+	}
+	if n, ok := values["radix-tree-keys"].(resp.Integer); ok {
+		s.RadixTreeKeys = int64(n)
+	}
+	if n, ok := values["radix-tree-nodes"].(resp.Integer); ok {
+		s.RadixTreeNodes = int64(n)
+	}
+	if n, ok := values["groups"].(resp.Integer); ok {
+		s.Groups = int64(n)
+	}
+	if id, ok := values["last-generated-id"].(*resp.BulkString); ok {
+		s.LastGeneratedID = *id
+	}
+
+	if entry, ok := values["last-entry"].(resp.Array); ok {
+		if err := entry.Decode([]interface{}{
+			&s.LastEntry.ID,
+			&s.LastEntry.Values,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if entry, ok := values["first-entry"].(resp.Array); ok {
+		if err := entry.Decode([]interface{}{
+			&s.FirstEntry.ID,
+			&s.FirstEntry.Values,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type XInfoEntry struct {
+	ID     string
+	Values map[string]string
+}
+
+func (info *XInfoEntry) UnmarshalRESP(v resp.Value) error {
+	return v.Decode([]interface{}{
+		&info.ID,
+		&info.Values,
+	})
+}
+
+type XInfoGroup struct {
+	Name      string
+	Consumers int64
+	Pending   int64
+}
+
+func (info *XInfoGroup) UnmarshalRESP(v resp.Value) error {
+	var values resp.SimpleStringRecord
+	if err := values.UnmarshalRESP(v); err != nil {
+		return err
+	}
+	var c XInfoGroup
+	if name, ok := values["name"].(*resp.BulkString); ok && name.Valid {
+		c.Name = name.String
+	}
+	if pending, ok := values["pending"].(resp.Integer); ok {
+		c.Pending = int64(pending)
+	}
+	if consumers, ok := values["consumers"].(resp.Integer); ok {
+		c.Consumers = int64(consumers)
+	}
+	*info = c
+	return nil
+}
+
+type XInfoConsumer struct {
+	Name    string
+	Pending int64
+	Idle    time.Duration
+}
+
+func (info *XInfoConsumer) UnmarshalRESP(v resp.Value) error {
+	var values resp.SimpleStringRecord
+	if err := values.UnmarshalRESP(v); err != nil {
+		return err
+	}
+	var c XInfoConsumer
+	if name, ok := values["name"].(*resp.BulkString); ok && name.Valid {
+		c.Name = name.String
+	}
+	if pending, ok := values["pending"].(resp.Integer); ok {
+		c.Pending = int64(pending)
+	}
+	if idle, ok := values["idle"].(resp.Integer); ok {
+		c.Idle = time.Duration(idle) * time.Millisecond
+	}
+	*info = c
+	return nil
+}
+
+// XInfoConsumers returns the list of every consumer in a specific consumer group
+func (b *batchAPI) XInfoConsumers(key, group string) *ReplyXInfoConsumers {
 	b.args.String("CONSUMERS")
 	b.args.Key(key)
 	b.args.String(group)
-	return b.doAny("XINFO")
-
+	reply := ReplyXInfoConsumers{}
+	reply.Bind(&reply.consumers)
+	b.do("XINFO", &reply.batchReply)
+	return &reply
 }
-func (b *batchAPI) XInfoGroups(key string) *ReplyAny {
+
+// XInfoGroups returns all the consumer groups associated with the stream.
+func (b *batchAPI) XInfoGroups(key string) *ReplyXInfoGroups {
 	b.args.String("GROUPS")
 	b.args.Key(key)
-	return b.doAny("XINFO")
+	reply := ReplyXInfoGroups{}
+	reply.Bind(&reply.groups)
+	b.do("XINFO", &reply.batchReply)
+	return &reply
 }
 
-func (b *batchAPI) XInfoStream(key string) *ReplyAny {
+type ReplyXInfoGroups struct {
+	groups []XInfoGroup
+	batchReply
+}
+
+func (r *ReplyXInfoGroups) Reply() ([]XInfoGroup, error) {
+	return r.groups, r.err
+}
+
+type ReplyXInfoConsumers struct {
+	consumers []XInfoConsumer
+	batchReply
+}
+
+func (r *ReplyXInfoConsumers) Reply() ([]XInfoConsumer, error) {
+	return r.consumers, r.err
+}
+
+// XInfoStream returns general information about the stream stored at the specified key.
+func (b *batchAPI) XInfoStream(key string) *ReplyXInfoStream {
 	b.args.String("STREAM")
 	b.args.Key(key)
-	return b.doAny("XINFO")
-}
-func (b *batchAPI) XInfoHelp() *ReplyAny {
-	b.args.String("HELP")
-	return b.doAny("XINFO")
+	reply := ReplyXInfoStream{}
+	reply.Bind(&reply.stream)
+	b.do("XINFO", &reply.batchReply)
+	return &reply
 }
 
+// XInfoHelp gets help for XINFO command
+func (b *batchAPI) XInfoHelp() *ReplyBulkStringArray {
+	b.args.String("HELP")
+	return b.doBulkStringArray("XINFO")
+}
+
+// XLen returns the number of entries inside a stream.
 func (b *batchAPI) XLen(key string) *ReplyInteger {
 	b.args.Key(key)
 	return b.doInteger("XLEN")
@@ -227,12 +397,130 @@ func (b *batchAPI) XRevRange(key, group, end, start string, count int64) *ReplyX
 	return &reply
 }
 
+func (b *batchAPI) XPending(key, group string) *ReplyXPendingSummary {
+	b.args.Key(key)
+	b.args.String(group)
+	reply := ReplyXPendingSummary{}
+	reply.Bind(&reply.summary)
+	b.do("XPENDING", &reply.batchReply)
+	return &reply
+}
+
+type XRange struct {
+	Start string
+	End   string
+	Count int64
+}
+
+func (b *batchAPI) XPendingGroup(args XPending) *ReplyXPending {
+	b.args.Key(args.Key)
+	b.args.String(args.Group)
+	start := args.Start
+	if start == "" {
+		start = "-"
+	}
+	b.args.String(start)
+	end := args.End
+	if end == "" {
+		start = "+"
+	}
+	b.args.String(end)
+	reply := ReplyXPending{}
+	reply.Bind(&reply.entries)
+	b.do("XPENDING", &reply.batchReply)
+	return &reply
+}
+func (b *batchAPI) XPendingConsumer(args XPending) *ReplyXPending {
+	b.args.Key(args.Key)
+	b.args.String(args.Group)
+	start := args.Start
+	if start == "" {
+		start = "-"
+	}
+	b.args.String(start)
+	end := args.End
+	if end == "" {
+		start = "+"
+	}
+	b.args.String(end)
+	b.args.String(args.Consumer)
+	reply := ReplyXPending{}
+	reply.Bind(&reply.entries)
+	b.do("XPENDING", &reply.batchReply)
+	return &reply
+}
+
 type XPending struct {
 	Key        string
 	Group      string
 	Consumer   string
 	Start, End string
 	Count      int64
+}
+
+type XPendingSummary struct {
+	Pending   int64
+	MinID     string
+	MaxID     string
+	Consumers []XPendingConsumer
+}
+
+func (x *XPendingSummary) UnmarshalRESP(v resp.Value) error {
+	return v.Decode([]interface{}{
+		&x.Pending,
+		&x.MinID,
+		&x.MaxID,
+		&x.Consumers,
+	})
+}
+
+type XPendingConsumer struct {
+	Name    string
+	Pending int64
+}
+
+func (x *XPendingConsumer) UnmarshalRESP(v resp.Value) error {
+	return v.Decode([]interface{}{
+		&x.Name,
+		&x.Pending,
+	})
+}
+
+type ReplyXPendingSummary struct {
+	summary XPendingSummary
+	batchReply
+}
+
+func (r *ReplyXPendingSummary) Reply() (XPendingSummary, error) {
+	return r.summary, r.Err()
+}
+
+type ReplyXPending struct {
+	entries []XPendingEntry
+	batchReply
+}
+
+func (r *ReplyXPending) Reply() ([]XPendingEntry, error) {
+	return r.entries, r.Err()
+}
+
+type XPendingEntry struct {
+	ID       string
+	Consumer string
+	age      int64
+	Retries  int64
+}
+
+func (x *XPendingEntry) Age() time.Duration {
+	return time.Duration(x.age) * time.Millisecond
+}
+func (x *XPendingEntry) UnmarshalRESP(v resp.Value) error {
+	return v.Decode([]interface{}{
+		&x.ID,
+		&x.Consumer,
+		&x.age,
+		&x.Retries,
+	})
 }
 
 // BuildCommand implements CommandBuilder interface
