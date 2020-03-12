@@ -7,18 +7,26 @@ import (
 	"github.com/alxarch/red/resp"
 )
 
-// BZPopMin is the blocking version of ZPOPMIN
-func (b *batchAPI) BZPopMin(timeout time.Duration, keys ...string) *ReplyZPop {
-	b.args.Keys(keys...)
-	b.args.Arg(Milliseconds(timeout))
-	return b.doZPop("BZPOPMIN")
+// BZPopMax is the blocking version of ZPopMax
+func (conn *Conn) BZPopMax(timeout time.Duration, key string, keys ...string) (z ZPop, err error) {
+	args := ArgBuilder{
+		args: make([]Arg, 0, len(keys)+2),
+	}
+	args.KeysUnique(key, keys...)
+	args.Milliseconds(timeout)
+	err = conn.DoCommand(&z, "BZPOPMAX", args.Args()...)
+	return
 }
 
-// BZPopMax is the blocking version of ZPopMax
-func (b *batchAPI) BZPopMax(timeout time.Duration, keys ...string) *ReplyZPop {
-	b.args.Keys(keys...)
-	b.args.Arg(Milliseconds(timeout))
-	return b.doZPop("BZPOPMAX")
+// BZPopMin is the blocking version of ZPopMin
+func (conn *Conn) BZPopMin(timeout time.Duration, key string, keys ...string) (z ZPop, err error) {
+	args := ArgBuilder{
+		args: make([]Arg, 0, len(keys)+2),
+	}
+	args.KeysUnique(key, keys...)
+	args.Milliseconds(timeout)
+	err = conn.DoCommand(&z, "BZPOPMIN", args.Args()...)
+	return
 }
 
 // ZAdd adds or modifies the a member of a sorted set
@@ -420,19 +428,31 @@ func (r *ReplyZRange) Reply() ([]ZEntry, error) {
 	return r.members, r.err
 }
 
+type ZPop struct {
+	Key    string
+	Member string
+	Score  float64
+}
+
+func (z *ZPop) UnmarshalRESP(v resp.Value) error {
+	return v.Decode([]interface{}{
+		&z.Key,
+		&z.Member,
+		&z.Score,
+	})
+}
+
 // ReplyZPop is the reply of a BZPOPMIN/BZPOPMAX command
 type ReplyZPop struct {
-	key    string
-	member string
-	score  float64
+	zpop ZPop
 	batchReply
 }
 
 // var _ batchReply = (*ReplyZPop)(nil)
 
 // Reply returns the BZPOPMIN/BZPOPMAX reply
-func (reply *ReplyZPop) Reply() (key, member string, score float64, err error) {
-	return reply.key, reply.member, reply.score, reply.err
+func (reply *ReplyZPop) Reply() (ZPop, error) {
+	return reply.zpop, reply.err
 }
 
 // type zEntries []ZEntry
@@ -484,11 +504,7 @@ func (z *zEntriesWithScores) UnmarshalRESP(v resp.Value) error {
 
 func (b *batchAPI) doZPop(cmd string) *ReplyZPop {
 	reply := ReplyZPop{}
-	reply.Bind([]interface{}{
-		&reply.key,
-		&reply.member,
-		&reply.score,
-	})
+	reply.Bind(&reply.zpop)
 	b.do(cmd, &reply.batchReply)
 	return &reply
 

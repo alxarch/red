@@ -104,11 +104,13 @@ func (p *Pool) Close() error {
 	var idle []*Conn
 	idle, p.idle = p.idle, nil
 	for _, conn := range idle {
-		conn.closeWithError(errPoolClosed)
+		conn.pool = nil
+		_ = conn.Close()
 	}
 	idle, p.queue = p.queue, nil
 	for _, conn := range idle {
-		conn.closeWithError(errPoolClosed)
+		conn.pool = nil
+		_ = conn.Close()
 	}
 	if ch := p.closeChan; ch != nil {
 		p.closeChan = nil
@@ -165,16 +167,15 @@ func (p *Pool) put(c *Conn) error {
 		p.discard(c)
 		return err
 	}
-	if c.err != nil {
+	if err := c.Err(); err != nil {
 		p.discard(c)
-		return c.err
+		return err
 	}
 	p.once.Do(p.init)
 	max := p.minConnections()
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		c.closeWithError(errPoolClosed)
 		p.discard(c)
 		return errPoolClosed
 	}
@@ -185,7 +186,6 @@ func (p *Pool) put(c *Conn) error {
 		return nil
 	}
 	p.mu.Unlock()
-	c.err = errors.New("Dropping connection")
 	p.discard(c)
 	return errConnClosed
 }

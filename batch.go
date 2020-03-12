@@ -12,6 +12,70 @@ import (
 type Batch struct {
 	batchAPI
 }
+
+type Pipeline struct {
+	Batch
+	mc managedConn
+}
+
+var pipelinePool = sync.Pool{
+	New: func() interface{} {
+		return new(Pipeline)
+	},
+}
+
+func getPipeline() *Pipeline {
+	return pipelinePool.Get().(*Pipeline)
+}
+func putPipeline(p *Pipeline) {
+	if p == nil {
+		return
+	}
+	_ = p.Close()
+	p.Reset()
+	pipelinePool.Put(p)
+}
+
+func (c *Conn) Pipeline() (*Pipeline, error) {
+	if err := c.Err(); err != nil {
+		return nil, err
+	}
+	if c.managed {
+		return nil, errConnManaged
+	}
+	if c.state.CountReplies() > 0 {
+		return nil, ErrReplyPending
+	}
+	c.managed = true
+	p := Pipeline{
+		mc: managedConn{
+			Conn: c,
+		},
+	}
+	return &p, nil
+}
+
+func (p *Pipeline) Sync() error {
+	if err := p.mc.Err(); err != nil {
+		return err
+	}
+	p.mc.Conn.managed = false
+	if err := p.mc.doBatch(&p.batchAPI); err != nil {
+		_ = p.Close()
+		return err
+	}
+	p.mc.Conn.managed = true
+	return nil
+}
+
+func (p *Pipeline) Close() error {
+	if p == nil {
+		return nil
+	}
+	err := p.mc.Close()
+	return err
+}
+
 type Tx struct {
 	batchAPI
 }
@@ -27,7 +91,7 @@ func (b *Batch) Multi(tx *Tx) *ReplyTX {
 	b.replies = append(b.replies, &reply.batchReply)
 	_ = tx.w.WriteTo(&b.w)
 	_ = b.w.WriteCommand("EXEC")
-	tx.Reset()
+	tx.reset()
 	return &reply
 }
 
@@ -62,7 +126,11 @@ func (b *batchAPI) Do(cmd string, args ...Arg) *ReplyAny {
 	return b.doAny(cmd)
 }
 
-func (b *batchAPI) Reset() {
+func (b *Batch) Reset() {
+	b.batchAPI.reset()
+}
+
+func (b *batchAPI) reset() {
 	b.args.Clear()
 	b.w.Reset()
 	for i := range b.replies {
@@ -152,7 +220,7 @@ func (conn *Conn) doBatch(b *batchAPI) error {
 	if conn.state.CountReplies() > 0 {
 		return ErrReplyPending
 	}
-	defer b.Reset()
+	defer b.reset()
 	if err := b.w.WriteTo(conn); err != nil {
 		return err
 	}

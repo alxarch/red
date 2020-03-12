@@ -2,7 +2,6 @@ package red
 
 import (
 	"errors"
-	"net"
 	"sync"
 	"time"
 
@@ -53,7 +52,7 @@ type Subscriber struct {
 
 	writeLock sync.Mutex
 	args      ArgBuilder
-	conn      *Conn
+	conn      managedConn
 	pending   int
 
 	subscriptions pubsub.Subscriptions
@@ -74,14 +73,6 @@ func (sub *Subscriber) isClosed() bool {
 		return false
 	}
 }
-func (sub *Subscriber) unmanage() {
-	sub.writeLock.Lock()
-	defer sub.writeLock.Unlock()
-	if sub.conn != nil {
-		sub.conn.managed = false
-		sub.conn = nil
-	}
-}
 
 // Close closes the subscriber
 func (sub *Subscriber) Close() (err error) {
@@ -91,6 +82,11 @@ func (sub *Subscriber) Close() (err error) {
 	_ = sub.punsubscribe(patterns...)
 	<-sub.doneCh
 	return nil
+}
+func (sub *Subscriber) closeConn() {
+	sub.writeLock.Lock()
+	defer sub.writeLock.Unlock()
+	sub.conn.Close()
 }
 
 var ErrSubscriberClosed = errors.New("Subscriber closed")
@@ -121,10 +117,11 @@ func (sub *Subscriber) do(cmd string, args ...string) error {
 	sub.args.Reset()
 	sub.args.Strings(args...)
 	sub.pending += len(args)
-	_ = sub.conn.pipeline.WriteCommand(cmd, sub.args.Args()...)
-	err := sub.conn.pipeline.Flush()
+	_ = sub.conn.w.WriteCommand(cmd, sub.args.Args()...)
+	err := sub.conn.w.Flush()
 	if err != nil {
-		sub.conn.closeWithError(err)
+		_ = sub.conn.Close()
+		return err
 	}
 
 	return err
@@ -173,54 +170,49 @@ func (sub *Subscriber) closeOnce() {
 		close(sub.closeCh)
 	})
 }
-func isTimeoutError(err error) bool {
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		return true
-	}
-	return false
-}
+
+// func isTimeoutError(err error) bool {
+// 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+// 		return true
+// 	}
+// 	return false
+// }
 
 func (sub *Subscriber) listenPubSub(messages chan<- *PubSubMessage) {
 	defer func() {
-		sub.unmanage()
+		sub.closeConn()
 		close(sub.doneCh)
 	}()
 	defer sub.closeOnce()
 	defer close(messages)
-	timeout := sub.conn.options.ReadTimeout
-	netConn := sub.conn.conn
-	resetTimeout := func() error {
-		var deadline time.Time
-		if timeout > 0 {
-			deadline = time.Now().Add(timeout)
-		}
-		if err := netConn.SetReadDeadline(deadline); err != nil {
-			_ = netConn.Close()
-			return err
-		}
-		return nil
+	if timeout := sub.conn.options.ReadTimeout; timeout > 0 {
+		go func() {
+			tick := time.NewTicker(timeout)
+			defer tick.Stop()
+			for {
+				select {
+				case <-sub.closeCh:
+					return
+				case <-tick.C:
+					if err := sub.do("PING", "PONG"); err != nil {
+						sub.closeOnce()
+						return
+					}
+				}
+			}
+		}()
 	}
-	if err := resetTimeout(); err != nil {
+
+	netConn := sub.conn.conn
+	if err := netConn.SetReadDeadline(time.Time{}); err != nil {
 		return
 	}
 	var numChannels int64
-	pingSent := false
 	for {
 		msg := new(pubsub.IncomingMessage)
 		if err := sub.conn.r.Decode(msg); err != nil {
-			if !pingSent && timeout > 0 && isTimeoutError(err) {
-				pingSent = true
-				if err := resetTimeout(); err != nil {
-					return
-				}
-				go sub.do("PING", "PONG")
-				continue
-			}
-			_ = netConn.Close()
 			return
 		}
-
-		pingSent = false
 
 		switch msg.Kind() {
 		case pubsub.KindMessage:
@@ -272,16 +264,16 @@ func (sub *Subscriber) listenPubSub(messages chan<- *PubSubMessage) {
 			if p == 0 && numChannels == 0 {
 				return
 			}
-			if err := resetTimeout(); err != nil {
-				return
-			}
+			// if err := resetTimeout(); err != nil {
+			// 	return
+			// }
 		}
 	}
 }
 
 func (conn *Conn) Subscriber(queueSize int) (*Subscriber, error) {
-	if conn.err != nil {
-		return nil, conn.err
+	if err := conn.Err(); err != nil {
+		return nil, err
 	}
 	if conn.state.CountReplies() > 0 {
 		return nil, ErrReplyPending
@@ -292,7 +284,9 @@ func (conn *Conn) Subscriber(queueSize int) (*Subscriber, error) {
 	}
 	messages := make(chan *PubSubMessage, queueSize)
 	sub := Subscriber{
-		conn:     conn,
+		conn: managedConn{
+			Conn: conn,
+		},
 		closeCh:  make(chan struct{}),
 		doneCh:   make(chan struct{}),
 		messages: messages,

@@ -18,11 +18,11 @@ import (
 type Conn struct {
 	noCopy noCopy //nolint:unused,structcheck
 
-	conn     net.Conn
-	err      error
-	pipeline PipelineWriter
-	r        resp.Stream
-	options  ConnOptions
+	conn net.Conn
+	// err      error
+	w       PipelineWriter
+	r       resp.Stream
+	options ConnOptions
 
 	managed bool
 	state   pipeline.State
@@ -50,8 +50,8 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 		return fmt.Errorf("Subscribe commands not allowed")
 	}
 
-	if err := conn.pipeline.WriteCommand(name, args...); err != nil {
-		conn.closeWithError(err)
+	if err := conn.w.WriteCommand(name, args...); err != nil {
+		_ = conn.Close()
 		return err
 	}
 	conn.updatePipeline(name, args...)
@@ -60,11 +60,11 @@ func (conn *Conn) WriteCommand(name string, args ...Arg) error {
 
 // DoCommand executes a redis command
 func (conn *Conn) DoCommand(dest interface{}, name string, args ...Arg) error {
-	if conn.err != nil {
-		return conn.err
+	if err := conn.Err(); err != nil {
+		return err
 	}
-	if conn.Dirty() {
-		return fmt.Errorf("Pending replies")
+	if n := conn.state.CountReplies(); n > 0 {
+		return fmt.Errorf("Pending %d replies", n)
 	}
 	if err := conn.WriteCommand(name, args...); err != nil {
 		return err
@@ -143,8 +143,8 @@ func (r *replyExec) UnmarshalRESP(v resp.Value) error {
 
 // ScanMulti scans the results of a MULTI/EXEC transaction
 func (conn *Conn) ScanMulti(dest ...interface{}) error {
-	if conn.err != nil {
-		return conn.err
+	if err := conn.Err(); err != nil {
+		return err
 	}
 	if conn.managed {
 		return errConnManaged
@@ -213,8 +213,8 @@ func (conn *Conn) ScanMulti(dest ...interface{}) error {
 //    This is not urgent as setting a lax deadline is not so harmful if
 //    the connection is healthy
 func (conn *Conn) Scan(dest interface{}) error {
-	if conn.err != nil {
-		return conn.err
+	if err := conn.Err(); err != nil {
+		return err
 	}
 	if conn.managed {
 		return errConnManaged
@@ -275,7 +275,10 @@ func (conn *Conn) Dirty() bool {
 
 // Err checks if the connection has an error
 func (conn *Conn) Err() error {
-	return conn.err
+	if conn != nil && conn.conn != nil {
+		return nil
+	}
+	return errConnClosed
 }
 
 // Close closes a redis connection
@@ -284,30 +287,21 @@ func (conn *Conn) Close() error {
 		err := conn.pool.put(conn)
 		return err
 	}
-	if conn.err == nil {
-		conn.closeWithError(errConnClosed)
-		return nil
+	if cn := conn.conn; conn != nil {
+		conn.conn = nil
+		return cn.Close()
 	}
-	return conn.err
-}
-
-func (conn *Conn) closeWithError(err error) {
-	if conn.err == nil {
-		var c net.Conn
-		c, conn.conn, conn.err = conn.conn, nil, err
-		_ = c.Close()
-	}
+	return errConnClosed
 }
 
 // Reset resets the connection to a state as defined by the options
 func (conn *Conn) Reset(options *ConnOptions) error {
-	if conn.err != nil {
-		return conn.err
+	if err := conn.Err(); err != nil {
+		return err
 	}
-
-	// if conn.managed {
-	// 	return errConnManaged
-	// }
+	if conn.managed {
+		return errConnManaged
+	}
 	if options == nil {
 		options = &conn.options
 	} else {
@@ -380,7 +374,7 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 		// NOTE: any write error in conn.cmd is sticky so it will be returned
 		// by the conn.WriteCommand call at the end of the function
 
-		_ = conn.pipeline.WriteCommand("CLIENT", String("REPLY"), String("SKIP"))
+		_ = conn.w.WriteCommand("CLIENT", String("REPLY"), String("SKIP"))
 		conn.updatePipeline("CLIENT", String("REPLY"), String("SKIP"))
 		return conn.WriteCommand(name, args...)
 	}
@@ -388,8 +382,8 @@ func (conn *Conn) injectCommand(name string, args ...Arg) error {
 
 // flush flushes the pipeline buffer
 func (conn *Conn) flush() error {
-	if err := conn.pipeline.Flush(); err != nil {
-		conn.closeWithError(err)
+	if err := conn.w.Flush(); err != nil {
+		_ = conn.Close()
 		return err
 	}
 	return nil
@@ -405,7 +399,7 @@ func (conn *Conn) drain() error {
 			continue
 		}
 		if err := conn.scanValue(nil, entry); err != nil {
-			conn.closeWithError(err)
+			_ = conn.Close()
 			return err
 		}
 		// if !conn.state.Dirty() {
@@ -447,15 +441,19 @@ func (conn *Conn) resetTimeout(entry pipeline.Entry) error {
 	}
 	return conn.conn.SetReadDeadline(time.Time{})
 }
+func isDecodeError(err error) bool {
+	_, ok := err.(*resp.DecodeError)
+	return ok
+}
 
 func (conn *Conn) scanValue(dest interface{}, entry pipeline.Entry) error {
 	if err := conn.resetTimeout(entry); err != nil {
-		conn.closeWithError(err)
+		_ = conn.Close()
 		return err
 	}
 	if err := conn.r.Decode(dest); err != nil {
-		if e := conn.r.Err(); e != nil {
-			conn.err = e
+		if !isDecodeError(err) {
+			_ = conn.Close()
 		}
 		return err
 	}
@@ -490,23 +488,6 @@ func (conn *Conn) Auth(password string) error {
 	}
 	return nil
 }
-
-// // Client handles over the connection to be managed by a red.Client
-// func (conn *Conn) Client() (*Client, error) {
-// 	if conn.err != nil {
-// 		return nil, conn.err
-// 	}
-// 	if conn.managed {
-// 		return nil, fmt.Errorf("Connection already managed")
-// 	}
-// 	if conn.Dirty() {
-// 		return nil, fmt.Errorf("Connection pending replies")
-// 	}
-// 	client := conn.getClient()
-// 	conn.manage()
-// 	client.conn = conn
-// 	return client, nil
-// }
 
 func (conn *Conn) updatePipeline(name string, args ...Arg) {
 	switch name {
@@ -578,4 +559,17 @@ func lastArgTimeout(args []Arg) time.Duration {
 		}
 	}
 	return 0
+}
+
+type managedConn struct {
+	*Conn
+}
+
+func (m *managedConn) Close() error {
+	if conn := m.Conn; m.conn != nil {
+		m.Conn = nil
+		conn.managed = false
+		return nil
+	}
+	return errConnClosed
 }

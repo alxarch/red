@@ -133,7 +133,7 @@ func WrapConn(conn net.Conn, options *ConnOptions) (*Conn, error) {
 		conn:    conn,
 		options: *options,
 		r:       *resp.NewStreamSize(conn, sizeR),
-		pipeline: PipelineWriter{
+		w: PipelineWriter{
 			KeyPrefix: options.KeyPrefix,
 			dest:      bufio.NewWriterSize(w, sizeW),
 		},
