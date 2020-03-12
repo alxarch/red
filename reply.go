@@ -155,12 +155,15 @@ func (*assertQueued) UnmarshalRESP(v resp.Value) error {
 	return nil
 }
 
+// ReplyTX is the reply from a MULTI/EXEC transaction
 type ReplyTX struct {
 	batchReply
 }
 
+// AssertNonNullArray checks if a RESP value is a non null array.
 type AssertNonNullArray struct{}
 
+// UnmarshalRESP implements resp.Unmarshaler interface
 func (*AssertNonNullArray) UnmarshalRESP(v resp.Value) error {
 	switch typ := v.Type(); typ {
 	case resp.TypeArray:

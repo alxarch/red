@@ -43,6 +43,7 @@ func (b *batchAPI) PubSubNumPat() *ReplyInteger {
 	return b.doInteger("PUBSUB")
 }
 
+// Subscriber subscribes to redis PUB/SUB channels
 type Subscriber struct {
 	messages <-chan *PubSubMessage
 
@@ -58,6 +59,7 @@ type Subscriber struct {
 	subscriptions pubsub.Subscriptions
 }
 
+// PubSubMessage is a message from a PUB/SUB channel
 type PubSubMessage struct {
 	Channel string
 	Payload string
@@ -89,11 +91,12 @@ func (sub *Subscriber) closeConn() {
 	sub.conn.Close()
 }
 
-var ErrSubscriberClosed = errors.New("Subscriber closed")
+var errSubscriberClosed = errors.New("Subscriber closed")
 
+// Subscribe subscribes to channels
 func (sub *Subscriber) Subscribe(channels ...string) error {
 	if sub.isClosed() {
-		return ErrSubscriberClosed
+		return errSubscriberClosed
 	}
 	if len(channels) == 0 {
 		return nil
@@ -101,9 +104,10 @@ func (sub *Subscriber) Subscribe(channels ...string) error {
 	return sub.do("SUBSCRIBE", channels...)
 }
 
+// PSubscribe subscribes to channels matching patterns
 func (sub *Subscriber) PSubscribe(patterns ...string) error {
 	if sub.isClosed() {
-		return ErrSubscriberClosed
+		return errSubscriberClosed
 	}
 	if len(patterns) == 0 {
 		return nil
@@ -147,22 +151,69 @@ func (sub *Subscriber) punsubscribe(patterns ...string) error {
 	return sub.do("PUNSUBSCRIBE", patterns...)
 }
 
+// Unsubscribe unsubscribes from channels
 func (sub *Subscriber) Unsubscribe(channels ...string) error {
 	if sub.isClosed() {
-		return ErrSubscriberClosed
+		return errSubscriberClosed
 	}
 	return sub.unsubscribe(channels...)
 }
 
+// PUnsubscribe unsubscribes from channels matching pattenrs
 func (sub *Subscriber) PUnsubscribe(patterns ...string) error {
 	if sub.isClosed() {
-		return ErrSubscriberClosed
+		return errSubscriberClosed
 	}
 	return sub.punsubscribe(patterns...)
 }
 
+// Messages returns a channel of incoming PUB/SUB messages
 func (sub *Subscriber) Messages() <-chan *PubSubMessage {
 	return sub.messages
+}
+
+// Get waits timeout for a message
+func (sub *Subscriber) Get() (*PubSubMessage, error) {
+	select {
+	case msg, ok := <-sub.Messages():
+		if ok {
+			return msg, nil
+		}
+		return nil, errSubscriberClosed
+	default:
+		return nil, nil
+	}
+}
+
+// Block waits forever for a message
+func (sub *Subscriber) Block() (*PubSubMessage, error) {
+	if msg, ok := <-sub.Messages(); ok {
+		return msg, nil
+	}
+	return nil, errSubscriberClosed
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string {
+	return "Timeout expired"
+}
+func (timeoutError) Timeout() bool {
+	return true
+}
+
+// Wait waits `timeout` for a message
+func (sub *Subscriber) Wait(timeout time.Duration) (*PubSubMessage, error) {
+	t := time.NewTimer(timeout)
+	select {
+	case <-t.C:
+		return nil, timeoutError{}
+	case msg, ok := <-sub.Messages():
+		if ok {
+			return msg, nil
+		}
+		return nil, errSubscriberClosed
+	}
 }
 
 func (sub *Subscriber) closeOnce() {
@@ -271,6 +322,7 @@ func (sub *Subscriber) listenPubSub(messages chan<- *PubSubMessage) {
 	}
 }
 
+// Subscriber enables pub/sub subscriber mode for a connection
 func (conn *Conn) Subscriber(queueSize int) (*Subscriber, error) {
 	if err := conn.Err(); err != nil {
 		return nil, err

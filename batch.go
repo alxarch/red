@@ -13,6 +13,7 @@ type Batch struct {
 	batchAPI
 }
 
+// Pipeline is a connection manager for easy pipelining
 type Pipeline struct {
 	Batch
 	mc managedConn
@@ -36,6 +37,7 @@ func putPipeline(p *Pipeline) {
 	pipelinePool.Put(p)
 }
 
+// Pipeline manages a connection for easier usage
 func (c *Conn) Pipeline() (*Pipeline, error) {
 	if err := c.Err(); err != nil {
 		return nil, err
@@ -55,6 +57,7 @@ func (c *Conn) Pipeline() (*Pipeline, error) {
 	return &p, nil
 }
 
+// Sync syncs all queued commands in the pipeline
 func (p *Pipeline) Sync() error {
 	if err := p.mc.Err(); err != nil {
 		return err
@@ -68,6 +71,7 @@ func (p *Pipeline) Sync() error {
 	return nil
 }
 
+// Close closes a pipeline releasing the managed connection
 func (p *Pipeline) Close() error {
 	if p == nil {
 		return nil
@@ -76,10 +80,12 @@ func (p *Pipeline) Close() error {
 	return err
 }
 
+// Tx is a MULTI/EXEC transaction block
 type Tx struct {
 	batchAPI
 }
 
+// Multi queues a MULTI/EXEC transaction
 func (b *Batch) Multi(tx *Tx) *ReplyTX {
 	reply := ReplyTX{
 		batchReply: batchReply{
@@ -126,6 +132,7 @@ func (b *batchAPI) Do(cmd string, args ...Arg) *ReplyAny {
 	return b.doAny(cmd)
 }
 
+// Reset clears all pending commands
 func (b *Batch) Reset() {
 	b.batchAPI.reset()
 }
@@ -203,8 +210,8 @@ func (b *batchAPI) doBool(cmd string) *ReplyBool {
 }
 
 // DoBatch executes a batch
-func (conn *Conn) DoBatch(b *Batch) error {
-	return conn.doBatch(&b.batchAPI)
+func (c *Conn) DoBatch(b *Batch) error {
+	return c.doBatch(&b.batchAPI)
 }
 
 // ErrReplyPending is the error of a reply until a `Client.Sync` is called
@@ -213,23 +220,23 @@ var ErrReplyPending = errors.New("Reply pending")
 // ErrDiscarded is the error of a reply if it's part of a transaction that got discarded
 var ErrDiscarded = errors.New("MULTI/EXEC Transaction discarded")
 
-func (conn *Conn) doBatch(b *batchAPI) error {
-	if err := conn.Err(); err != nil {
+func (c *Conn) doBatch(b *batchAPI) error {
+	if err := c.Err(); err != nil {
 		return err
 	}
-	if conn.state.CountReplies() > 0 {
+	if c.state.CountReplies() > 0 {
 		return ErrReplyPending
 	}
 	defer b.reset()
-	if err := b.w.WriteTo(conn); err != nil {
+	if err := b.w.WriteTo(c); err != nil {
 		return err
 	}
-	if conn.state.IsMulti() {
-		if err := conn.WriteCommand("EXEC"); err != nil {
+	if c.state.IsMulti() {
+		if err := c.WriteCommand("EXEC"); err != nil {
 			return err
 		}
 	}
-	return conn.scanBatch(b.replies)
+	return c.scanBatch(b.replies)
 }
 
 type batchExec []*batchReply
@@ -269,11 +276,11 @@ func unwrapDecodeError(err error) error {
 	}
 	return err
 }
-func (conn *Conn) scanBatch(replies []*batchReply) error {
+func (c *Conn) scanBatch(replies []*batchReply) error {
 	if len(replies) == 0 {
 		return nil
 	}
-	if err := conn.flush(); err != nil {
+	if err := c.flush(); err != nil {
 		for _, reply := range replies {
 			reply.reject(err)
 		}
@@ -284,7 +291,7 @@ func (conn *Conn) scanBatch(replies []*batchReply) error {
 		reply := replies[i]
 		if queued, ok := reply.dest.([]*batchReply); ok {
 			ok := AssertOK{}
-			if err := conn.Scan(&ok); err != nil {
+			if err := c.Scan(&ok); err != nil {
 				err = unwrapDecodeError(err)
 				for i := range queued {
 					queued[i].reject(err)
@@ -294,17 +301,17 @@ func (conn *Conn) scanBatch(replies []*batchReply) error {
 			}
 			for _, reply := range queued {
 				q := assertQueued{}
-				if err := conn.Scan(&q); err != nil {
+				if err := c.Scan(&q); err != nil {
 					err = unwrapDecodeError(err)
 					reply.reject(err)
 				}
 			}
 			tx := batchExec(queued)
-			reply.err = unwrapDecodeError(conn.Scan(&tx))
+			reply.err = unwrapDecodeError(c.Scan(&tx))
 		} else {
-			reply.err = unwrapDecodeError(conn.Scan(reply.dest))
+			reply.err = unwrapDecodeError(c.Scan(reply.dest))
 		}
-		if err := conn.Err(); err != nil {
+		if err := c.Err(); err != nil {
 			for _, reply := range replies[i:] {
 				reply.reject(err)
 			}
