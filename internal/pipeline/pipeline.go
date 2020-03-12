@@ -48,6 +48,7 @@ func (s *State) Pop() (Entry, bool) {
 	if last := len(s.stack) - 1; 0 <= last && last < len(s.stack) {
 		var entry Entry
 		entry, s.stack = s.stack[last], s.stack[:last]
+		s.dirty = len(s.stack) != 0
 		return entry, true
 	}
 	if len(s.queue) > 0 {
@@ -56,7 +57,7 @@ func (s *State) Pop() (Entry, bool) {
 			s.stack = append(s.stack, tail[i])
 		}
 		s.queue = s.queue[:0]
-		s.dirty = len(tail) == 0
+		s.dirty = len(tail) != 0
 		return entry, true
 	}
 	s.dirty = false
